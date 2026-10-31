@@ -1,0 +1,55 @@
+[package]
+name = "zkpool_backend"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+description = "Backend for zkpool-solana: HTTP API + indexer + Merkle tree cache"
+
+[lib]
+name = "zkpool_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zkpool-backend"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenvy = "0.15"
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-native-tls",
+  "postgres",
+  "uuid",
+  "chrono",
+  "json",
+] }
+redis = { version = "0.25", features = [
+  "tokio-comp",
+  "ahash",
+  "connection-manager",
+] }
+hex = "0.4"
+base64 = "0.21"
+bs58 = "0.5"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "json",
+  "fmt",
+] }
+reqwest = { version = "0.12", features = ["json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+axum-prometheus = "0.7"
+thiserror = "2"
+
+[workspace]

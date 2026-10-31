@@ -64,6 +64,9 @@ withdrawal.
 
 ## Quick start
 
+> **Note:** `VERIFIER_PROGRAM_ID` in `.env` must match `onchain/programs/zk_pool/src/constants.rs`.
+> Update it manually after every verifier redeploy.
+
 ```bash
 git clone git@github.com:kwebhub/zkpool-mesh.git
 cd zkpool-mesh

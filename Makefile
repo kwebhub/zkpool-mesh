@@ -1,10 +1,10 @@
 SHELL := /bin/bash
 
-COMPOSE   := docker compose -f infra/docker-compose.yml
+COMPOSE   := podman compose -f infra/docker-compose.yml
 SERVICE   := solana
 CONTAINER := zkpool-mesh
-PG        := zkpool-postgres
-REDIS     := zkpool-redis
+PG        := zkpool-mesh-postgres
+REDIS     := zkpool-mesh-redis
 
 exec_c := $(COMPOSE) exec $(SERVICE) bash -ic
 exec_d := $(COMPOSE) exec -d $(SERVICE) bash -ic
@@ -48,9 +48,9 @@ reset: down
 	@$(COMPOSE) up -d
 	@sleep 3
 	@echo "==> clearing Postgres + Redis"
-	@docker exec $(PG) psql -U zkpool -d zkpool -c \
+	@podman exec $(PG) psql -U zkpool -d zkpool -c \
 	  "TRUNCATE commitments, roots, nullifiers RESTART IDENTITY CASCADE;" || true
-	@docker exec $(REDIS) redis-cli FLUSHALL || true
+	@podman exec $(REDIS) redis-cli FLUSHALL || true
 	@$(MAKE) merkle prover backend wait-healthy
 
 merkle:

@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning — auto-load from /var/lib/grafana/dashboards.
+
+apiVersion: 1
+
+providers:
+  - name: zkpool
+    orgId: 1
+    folder: zkpool-solana
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

@@ -1,0 +1,14 @@
+# Prometheus scrape config for zkpool-solana.
+#
+# Scrapes the backend's /metrics endpoint every 15 seconds.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "zkpool-backend"
+    static_configs:
+      - targets: ["solana:4001"]
+        labels:
+          service: "backend"

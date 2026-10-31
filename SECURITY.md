@@ -14,7 +14,6 @@ Only the `main` branch receives security fixes.
 This is a **demo / educational project**, not production software. Before
 reporting an issue, read:
 
-- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — project scope and rules.
 - `docs/ru/articles/` — engineering notes per stage (once published).
 
 Many "vulnerabilities" are **known limitations** documented in the engineering

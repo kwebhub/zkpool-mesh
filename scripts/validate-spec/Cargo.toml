@@ -1,0 +1,18 @@
+[package]
+name = "validate-spec"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+description = "Validate that withdrawal circuit spec.json is consistent with its consumers (.nr, Rust, TypeScript)."
+
+[[bin]]
+name = "validate-spec"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[workspace]

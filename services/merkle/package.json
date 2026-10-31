@@ -1,0 +1,19 @@
+{
+  "name": "zkpool-merkle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Merkle service for zkpool-solana — Poseidon2 hashing via @noir-lang/noir_js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@noir-lang/noir_js": "1.0.0-rc.2",
+    "fastify": "5.12.5"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

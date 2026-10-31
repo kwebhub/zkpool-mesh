@@ -1,0 +1,40 @@
+[package]
+name = "zkpool_prover"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+description = "Prover for zkpool-solana: generates Groth16 proofs via Sunspot"
+
+[lib]
+name = "zkpool_prover"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zkpool-prover"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenvy = "0.15"
+anyhow = "1.0"
+uuid = { version = "1", features = ["v4"] }
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "json",
+  "fmt",
+] }
+thiserror = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+serde_json = "1.0"
+
+[workspace]

@@ -1,0 +1,109 @@
+services:
+  solana:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.mesh
+    container_name: zkpool-mesh-app
+    user: "1000:1000"
+    userns_mode: keep-id
+    stdin_open: true
+    tty: true
+
+    working_dir: /home/ubuntu
+    volumes:
+      - ../onchain:/home/ubuntu/onchain
+      - ../circuits:/home/ubuntu/circuits
+      - ../services:/home/ubuntu/services
+      - ../web:/home/ubuntu/web
+      - ../scripts:/home/ubuntu/scripts
+      - ../tests:/home/ubuntu/tests
+      - ../solana:/home/ubuntu/.config/solana
+      - ../deny.toml:/home/ubuntu/deny.toml:ro
+      - ../Makefile:/home/ubuntu/Makefile:ro
+      - ../.env:/home/ubuntu/.env
+    environment:
+      - CARGO_TERM_COLOR=always
+    ports:
+      - "4001:4001" # backend
+      - "4002:4002" # prover
+      - "4003:4003" # merkle
+      - "5173:5173" # vite dev server
+    # `network_mode: host` is NOT used. The solana container needs to reach
+    # Postgres and Redis by their service names on the default bridge network.
+    # For local dev, the backend (running inside `solana`) connects to
+    # `postgres:5432` and `redis:6379` — see `.env.example`.
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: zkpool-mesh-postgres
+    environment:
+      POSTGRES_USER: zkpool
+      POSTGRES_PASSWORD: zkpool_dev_password
+      POSTGRES_DB: zkpool
+    ports:
+      - "5432:5432"
+    volumes:
+      - zkpool-mesh-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zkpool -d zkpool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: zkpool-mesh-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - zkpool-mesh-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: zkpool-mesh-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - zkpool-mesh-prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    depends_on:
+      - solana
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: zkpool-mesh-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - zkpool-mesh-grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  zkpool-mesh-postgres-data:
+  zkpool-mesh-redis-data:
+  zkpool-mesh-prometheus-data:
+  zkpool-mesh-grafana-data:

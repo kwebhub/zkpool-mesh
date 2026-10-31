@@ -1,0 +1,29 @@
+[package]
+name = "zk_pool"
+version = "0.1.0"
+description = "Private SOL transfers on Solana using ZK proofs"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "zk_pool"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = "1.1.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(target_os, values("solana"))',
+] }
