@@ -1,0 +1,36 @@
+[package]
+name = "e2e-deposit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90.0"
+license = "MIT"
+description = "E2E deposit script: generates a note, computes commitment, sends deposit tx."
+
+[[bin]]
+name = "e2e-deposit"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+bs58 = "0.5"
+hex = "0.4"
+base64 = "0.22"
+rand = "0.8"
+
+solana-hash = "4.5.0"
+solana-instruction = "3.4.0"
+solana-keypair = "3.1.2"
+solana-message = "4.2.4"
+solana-pubkey = "3"
+solana-sdk-ids = "3.1.0"
+solana-signer = "3.0.1"
+
+solana-address = { version = "~2.6.1", features = ["curve25519"] }
+zkpool-common = { version = "0.1.0", path = "../common" }
+dotenvy = "0.15.7"
+
+[workspace]

@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "description": "Single source of truth for the withdrawal circuit public/private inputs, byte layout, and artifact consumers. Any change here requires regenerating or re-validating all layers (.nr, Rust encode_public_inputs, TypeScript witness builder).",
+
+  "circuit": {
+    "name": "withdrawal",
+    "package": "withdrawal",
+    "entrypoint": "main",
+    "tree_depth": 20,
+    "split_count": 3,
+    "nr_public_inputs": 6
+  },
+
+  "public_inputs": [
+    {
+      "name": "root",
+      "type": "field",
+      "bytes": 32,
+      "encoding": "bn254_big_endian",
+      "description": "Merkle root; must be in PoolState.roots[] history."
+    },
+    {
+      "name": "nullifier_hash",
+      "type": "field",
+      "bytes": 32,
+      "encoding": "bn254_big_endian",
+      "description": "hash_1(nullifier); used as PDA seed for NullifierRecord."
+    },
+    {
+      "name": "recipient",
+      "type": "pubkey",
+      "bytes": 32,
+      "encoding": "solana_pubkey_reduced_to_bn254",
+      "description": "Solana Pubkey reduced modulo BN254 field prime. Must equal the recipient account passed to the instruction."
+    },
+    {
+      "name": "recipient_binding",
+      "type": "field",
+      "bytes": 32,
+      "encoding": "bn254_big_endian",
+      "description": "hash_2(note_secret, recipient); binds the proof to a specific recipient, prevents front-running."
+    },
+    {
+      "name": "amount",
+      "type": "u64",
+      "bytes": 8,
+      "padded_to": 32,
+      "padding": "right_aligned",
+      "encoding": "u64_big_endian",
+      "description": "Withdrawal amount in lamports for THIS note (one of the splits). Padded to a full 32-byte field word: high 24 bytes zero, low 8 bytes big-endian u64."
+    },
+    {
+      "name": "total_amount",
+      "type": "u64",
+      "bytes": 8,
+      "padded_to": 32,
+      "padding": "right_aligned",
+      "encoding": "u64_big_endian",
+      "description": "Aggregate deposit amount (sum of all splits) in lamports. Padded to a full 32-byte field word. Added in Stage 15 (split deposit)."
+    }
+  ],
+
+  "private_inputs": [
+    {
+      "name": "nullifier",
+      "type": "field",
+      "description": "Secret nullifier; only the user knows it."
+    },
+    {
+      "name": "secret",
+      "type": "field",
+      "description": "Secret used in commitment."
+    },
+    {
+      "name": "note_secret",
+      "type": "field",
+      "description": "Secret used in recipient_binding."
+    },
+    {
+      "name": "merkle_proof",
+      "type": "array",
+      "element": "field",
+      "length": 20,
+      "description": "Sibling hashes along the path from leaf to root."
+    },
+    {
+      "name": "is_even",
+      "type": "array",
+      "element": "bool",
+      "length": 20,
+      "description": "For each level: true if our node is the left child, false if right."
+    },
+    {
+      "name": "splits",
+      "type": "array",
+      "element": "field",
+      "length": 3,
+      "description": "Split vector of the deposit this note belongs to. Added in Stage 15 (split deposit). Must satisfy Σ splits[i] == total_amount (C4) and splits[note_index] == amount (C5)."
+    },
+    {
+      "name": "note_index",
+      "type": "u32",
+      "description": "Index of this note within the splits array (0, 1, or 2). Added in Stage 15 (split deposit). Must be < SPLIT_COUNT (checked in-circuit before array indexing)."
+    }
+  ],
+
+  "constraints": [
+    {
+      "id": "C1",
+      "formula": "hash_1(nullifier) == nullifier_hash",
+      "description": "Nullifier hash matches the public input."
+    },
+    {
+      "id": "C2",
+      "formula": "hash_2(note_secret, recipient) == recipient_binding",
+      "description": "Recipient binding matches the public input."
+    },
+    {
+      "id": "C3",
+      "formula": "compute_merkle_root(hash_3(nullifier, secret, amount), merkle_proof, is_even) == root",
+      "description": "Commitment is in the tree with the given root."
+    },
+    {
+      "id": "C4",
+      "formula": "splits[0] + splits[1] + splits[2] == total_amount",
+      "description": "Sum of the split vector equals the aggregate deposit amount. Added in Stage 15. Prevents a malicious depositor from claiming a smaller total_amount than the actual sum of the notes."
+    },
+    {
+      "id": "C5",
+      "formula": "splits[note_index] == amount",
+      "description": "The amount of THIS note equals the corresponding element of the split vector. Added in Stage 15. Combined with C4, guarantees that the withdrawal is for a legitimate portion of the deposit."
+    }
+  ],
+
+  "hash_functions": {
+    "hash_1": {
+      "signature": "fn hash_1(input: Field) -> Field",
+      "implementation": "poseidon2_permutation([input, 0, 0, 0])[0]"
+    },
+    "hash_2": {
+      "signature": "fn hash_2(input1: Field, input2: Field) -> Field",
+      "implementation": "poseidon2_permutation([input1, input2, 0, 0])[0]"
+    },
+    "hash_3": {
+      "signature": "fn hash_3(input1: Field, input2: Field, input3: Field) -> Field",
+      "implementation": "poseidon2_permutation([input1, input2, input3, 0])[0]"
+    },
+    "hash_4": {
+      "status": "forbidden",
+      "reason": "Poseidon2 with t=4, rate=3, capacity=1. Using all 4 slots as input sets capacity=0 and destroys cryptographic security. hash_4 must never be used."
+    }
+  },
+
+  "witness_layout": {
+    "description": "The byte layout of the witness blob passed to sunspot prove (and expected by the on-chain encode_public_inputs).",
+    "header": {
+      "bytes": 12,
+      "fields": [
+        { "name": "nr_public_inputs", "type": "u32", "endianness": "big" },
+        { "name": "reserved", "type": "u32", "endianness": "big", "value": 0 },
+        { "name": "nr_public_inputs_again", "type": "u32", "endianness": "big" }
+      ]
+    },
+    "public_inputs_section": {
+      "bytes": 192,
+      "layout": "6 × 32 bytes, in the order defined in public_inputs[]"
+    },
+    "total_bytes": 204
+  },
+
+  "artifacts": {
+    "description": "Which JSON artifacts are produced from this circuit, and who consumes them.",
+    "json": "withdrawal.json",
+    "consumers": {
+      "prover": {
+        "mode": "direct",
+        "path": "circuits/withdrawal/target/withdrawal.json",
+        "reason": "Prover runs inside the solana container with access to circuits/."
+      },
+      "merkle": {
+        "mode": "copy",
+        "path": "services/merkle/circuits/withdrawal.json",
+        "reason": "Merkle service is a Node.js process that may run outside the container."
+      },
+      "web": {
+        "mode": "copy",
+        "path": "web/public/circuits/withdrawal.json",
+        "reason": "Frontend serves the ACIR to the browser for noir_js witness generation."
+      }
+    }
+  },
+
+  "consumers_of_public_layout": [
+    {
+      "layer": "noir",
+      "path": "circuits/withdrawal/src/main.nr",
+      "obligation": "pub parameters of main() must appear in the exact order of public_inputs[] (6 inputs after Stage 15)"
+    },
+    {
+      "layer": "anchor",
+      "path": "onchain/programs/zk_pool/src/encoding.rs",
+      "function": "encode_public_inputs",
+      "obligation": "must produce bytes matching witness_layout exactly (204 bytes after Stage 15)"
+    },
+    {
+      "layer": "frontend",
+      "path": "web/src/noir/poseidon.ts",
+      "function": "poseidon2Hash",
+      "obligation": "must produce Poseidon2 hashes matching the circuit's hash_2 exactly (byte-identical to noir_js in the browser)"
+    },
+    {
+      "layer": "frontend",
+      "path": "web/src/withdraw/buildWitness.ts",
+      "function": "buildWitness",
+      "obligation": "must assemble a witness matching witness_layout exactly, including the new total_amount public input and the new splits + note_index private inputs (Stage 15)"
+    }
+  ],
+
+  "checkpoints": {
+    "stage_2": [
+      "circuits/withdrawal/target/withdrawal.json",
+      "circuits/hash2/target/hash2.json",
+      "circuits/hashes/target/hashes.json",
+      "circuits/withdrawal/Prover.toml"
+    ],
+    "stage_3": [
+      "circuits/withdrawal/target/withdrawal.ccs",
+      "circuits/withdrawal/target/withdrawal.pk",
+      "circuits/withdrawal/target/withdrawal.vk",
+      "circuits/withdrawal/target/withdrawal.so",
+      "circuits/withdrawal/target/withdrawal-keypair.json"
+    ]
+  }
+}

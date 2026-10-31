@@ -1,12 +1,22 @@
-# cargo-deny configuration for zkpool-mesh
-# Schema for cargo-deny 0.20.x
+# cargo-deny configuration — for cargo-deny 0.20.2.
+#
+# Key points:
+#   - `version = 2` and `allow-osi-fsf-free` are removed in 0.20.x.
+#   - All licenses are denied by default; only entries in `allow` pass.
+#   - Workspace crates (private, unpublished) are skipped via `private`.
+#   - Compound expressions must be listed verbatim.
 
 [graph]
 targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 
+# ============================================================
+# LICENSES
+# ============================================================
+
 [licenses]
 confidence-threshold = 0.8
 private = { ignore = true }
+
 allow = [
   "0BSD",
   "Apache-2.0",
@@ -27,12 +37,24 @@ allow = [
   "Zlib",
 ]
 
+# ============================================================
+# ADVISORIES
+# ============================================================
+
 [advisories]
 yanked = "warn"
+
+# ============================================================
+# BANS
+# ============================================================
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+
+# ============================================================
+# SOURCES
+# ============================================================
 
 [sources]
 unknown-registry = "warn"

@@ -1,0 +1,18 @@
+[package]
+name = "sync-circuits"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+description = "Compile Noir circuits and sync JSON artifacts to consumers with SHA-256 verification."
+
+[[bin]]
+name = "sync-circuits"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+
+[workspace]

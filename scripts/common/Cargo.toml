@@ -1,0 +1,10 @@
+[package]
+name = "zkpool-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+dotenvy = "0.15"
+
+[workspace]

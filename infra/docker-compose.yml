@@ -3,10 +3,12 @@ services:
     build:
       context: ..
       dockerfile: infra/docker/Dockerfile.mesh
-    container_name: zkpool-mesh
+    container_name: zkpool-mesh-app
+    user: "1000:1000"
+    userns_mode: keep-id
     stdin_open: true
     tty: true
-    user: "1000:1000"
+
     working_dir: /home/ubuntu
     volumes:
       - ../onchain:/home/ubuntu/onchain
@@ -17,6 +19,8 @@ services:
       - ../tests:/home/ubuntu/tests
       - ../solana:/home/ubuntu/.config/solana
       - ../deny.toml:/home/ubuntu/deny.toml:ro
+      - ../Makefile:/home/ubuntu/Makefile:ro
+      - ../.env:/home/ubuntu/.env
     environment:
       - CARGO_TERM_COLOR=always
     ports:
