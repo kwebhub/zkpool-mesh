@@ -40,6 +40,7 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Arc::new(Config::from_env()?);
+    eprintln!("DEBUG hello");
     logging::init_logging()?;
     info!("logging initialized");
     metrics::init_metrics()?;

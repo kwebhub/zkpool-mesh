@@ -62,6 +62,7 @@ impl MerkleClient {
     ///
     /// Both inputs are 32-byte hex strings without `0x`.
     pub async fn hash_2(&self, left: &str, right: &str) -> Result<String> {
+        eprintln!("DEBUG hash_2 left={:?} right={:?}", left, right);
         let url = format!("{}/hash", self.base_url);
         let resp: serde_json::Value = self
             .http
@@ -142,7 +143,7 @@ impl MerkleTree {
 
         self.cache.set(&self.key_root(), &prev_empty).await?;
         self.cache.set(&self.key_size(), "0").await?;
-
+        eprintln!("DEBUG init_empty done");
         Ok(())
     }
 
@@ -150,6 +151,7 @@ impl MerkleTree {
     ///
     /// `leaf_hex` is a 32-byte hash as a hex string without `0x`.
     pub async fn add_leaf(&mut self, leaf_hex: &str) -> Result<String> {
+        eprintln!("DEBUG add_leaf called: {}", leaf_hex);
         if leaf_hex.len() != 64 {
             return Err(anyhow!(
                 "leaf_hex must be 64 hex chars (32 bytes), got {}",

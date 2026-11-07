@@ -39,6 +39,8 @@ export async function buildApp({ logger = true } = {}) {
   app.post("/hash", async (req, reply) => {
     const { left, right } = req.body ?? {};
     if (!isHex64(left) || !isHex64(right)) {
+      console.error("400 /hash content-type:", req.headers['content-type']);
+      console.error("400 /hash body:", JSON.stringify(req.body));
       return reply.code(400).send({
         error: "left and right must be 64-char bare hex strings (no 0x)",
       });
@@ -51,6 +53,7 @@ export async function buildApp({ logger = true } = {}) {
   app.post("/hashes", async (req, reply) => {
     const { nullifier, secret, amount } = req.body ?? {};
     if (!isHex64(nullifier) || !isHex64(secret) || !isHex64(amount)) {
+      console.error("400 /hashes body:", JSON.stringify(req.body));
       return reply.code(400).send({
         error: "nullifier, secret and amount must be 64-char bare hex strings (no 0x)",
       });
@@ -63,11 +66,13 @@ export async function buildApp({ logger = true } = {}) {
   app.post("/root", async (req, reply) => {
     const { commitments } = req.body ?? {};
     if (!Array.isArray(commitments) || !commitments.every(isHex64)) {
+      console.error("400 /root body:", JSON.stringify(req.body));
       return reply.code(400).send({
         error: "commitments must be an array of 64-char bare hex strings (no 0x)",
       });
     }
     if (commitments.length > 2 ** TREE_DEPTH) {
+      console.error("400 /root too many:", commitments.length);
       return reply.code(400).send({
         error: `too many commitments: ${commitments.length} > 2^${TREE_DEPTH}`,
       });
@@ -80,6 +85,7 @@ export async function buildApp({ logger = true } = {}) {
   app.post("/proof", async (req, reply) => {
     const { commitments, leaf_index } = req.body ?? {};
     if (!Array.isArray(commitments) || !commitments.every(isHex64)) {
+      console.error("400 /proof body:", JSON.stringify(req.body));
       return reply.code(400).send({
         error: "commitments must be an array of 64-char bare hex strings (no 0x)",
       });
@@ -90,6 +96,7 @@ export async function buildApp({ logger = true } = {}) {
       leaf_index < 0 ||
       leaf_index >= commitments.length
     ) {
+      console.error("400 /proof leaf_index:", leaf_index);
       return reply.code(400).send({
         error: `leaf_index must be an integer in [0, ${commitments.length})`,
       });

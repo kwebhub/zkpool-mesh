@@ -4,8 +4,6 @@ services:
       context: ..
       dockerfile: infra/docker/Dockerfile.mesh
     container_name: zkpool-mesh-app
-    user: "1000:1000"
-    userns_mode: keep-id
     stdin_open: true
     tty: true
 

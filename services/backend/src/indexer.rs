@@ -325,10 +325,13 @@ impl Indexer {
     /// Handle a parsed DepositEvent: save to DB, update tree.
     async fn handle_deposit(&self, signature: &str, evt: DepositEvent) -> Result<()> {
         // Idempotency: if commitment already exists, skip.
-        if self.db.commitment_exists(&evt.commitment).await? {
-            debug!("commitment already indexed, skipping");
-            return Ok(());
-        }
+        // if self.db.commitment_exists(&evt.commitment).await? {
+        //     debug!("commitment already indexed, skipping");
+        //     return Ok(());
+        // }
+        // Idempotency: if commitment already exists in DB, still add to tree
+        // (Redis may have been flushed; tree must be rebuilt).
+        let already_in_db = self.db.commitment_exists(&evt.commitment).await?;
 
         self.db
             .save_commitment(

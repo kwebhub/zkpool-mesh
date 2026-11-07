@@ -67,17 +67,64 @@ withdrawal.
 > **Note:** `VERIFIER_PROGRAM_ID` in `.env` must match `onchain/programs/zk_pool/src/constants.rs`.
 > Update it manually after every verifier redeploy.
 
+### Prerequisites
+
+- Docker
+- Git
+- ~5 GB free disk space for the container image
+- A funded Solana devnet wallet at `solana/id.json`
+
+### First-time setup
+
 ```bash
+# 1. Clone
 git clone git@github.com:kwebhub/zkpool-mesh.git
 cd zkpool-mesh
-make up
-make status
+
+# 2. Environment
+cp .env.example .env
+# Edit .env: set PROGRAM_ID, POOL_ADDRESS, VERIFIER_PROGRAM_ID
+
+# 3. Wallet (devnet)
+mkdir -p solana
+docker compose -f infra/docker-compose.yml up -d
+docker exec -it zkpool-mesh-app bash -l -c "solana-keygen new -o /home/ubuntu/.config/solana/id.json --no-bip39-passphrase --force"
+docker exec -it zkpool-mesh-app bash -l -c "solana-keygen pubkey /home/ubuntu/.config/solana/id.json"
+# Fund the printed pubkey via https://faucet.solana.com (devnet, 2 SOL)
+docker exec -it zkpool-mesh-app bash -l -c "solana config set --url devnet && solana balance"
+docker compose -f infra/docker-compose.yml down
+
+# 4. Init everything
+make init
 ```
 
-`make up` starts the Docker Compose stack and all services inside the container.
-`make status` prints container state, running processes, and HTTP health.
+`make init` builds the image, applies migrations, generates ACIR, installs JS dependencies, builds the services, and starts them.
 
-Prerequisites: Docker, Git, ~5 GB free disk space for the container image.
+### Daily use
+
+```bash
+make up       # start infra + services
+make status   # containers + processes + HTTP health + sync
+make logs     # tail service logs
+make down     # stop all
+make wipe     # remove everything (containers, volumes, images, caches)
+```
+
+### E2E on devnet
+
+After `make init` and `make up`:
+
+```bash
+make e2e
+```
+
+This runs `e2e-deposit`, extracts the note, waits for the indexer, and runs `e2e-withdraw`. Logs are saved to `/tmp/e2e-deposit.log` and `/tmp/e2e-withdraw.log`.
+
+### Rebuild
+
+```bash
+make build    # backend + prover + web
+```
 
 ## Repository layout
 
