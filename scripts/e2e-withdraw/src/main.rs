@@ -212,16 +212,18 @@ async fn main() -> Result<()> {
         "splits": splits,
         "note_index": note_index,
     });
-    let withdraw_resp: Value = client
+    let withdraw_http = client
         .post(format!("{}/api/withdraw", &zkpool_common::backend_url()))
         .json(&withdraw_body)
         .send()
         .await
-        .context("POST /api/withdraw failed")?
-        .error_for_status()
-        .context("POST /api/withdraw returned error")?
-        .json()
-        .await?;
+        .context("POST /api/withdraw failed")?;
+    if !withdraw_http.status().is_success() {
+        let status = withdraw_http.status();
+        let body = withdraw_http.text().await.unwrap_or_default();
+        bail!("POST /api/withdraw returned {}: {}", status, body);
+    }
+    let withdraw_resp: Value = withdraw_http.json().await?;
 
     let proof_b64 = withdraw_resp["proof"].as_str().context("missing proof")?;
     let pw_b64 = withdraw_resp["public_witness"]

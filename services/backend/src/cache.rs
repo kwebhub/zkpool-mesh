@@ -7,6 +7,7 @@
 //!   1. Merkle tree state (`tree:*` keys) — see `tree.rs`.
 //!   2. Rate limiting counters (`rate:*` keys) — see `rate_limit.rs`.
 //!   3. Response caching for `/api/commitments` and `/api/root`.
+//!   4. Indexer bookkeeping (`indexer:*` keys) — see `indexer.rs`.
 
 use anyhow::{Context, Result};
 use redis::aio::ConnectionManager;
@@ -71,6 +72,14 @@ impl Cache {
             .await
             .with_context(|| format!("Redis DEL failed for key {:?}", key))?;
         Ok(removed > 0)
+    }
+
+    /// Delete a key, ignoring the "did it exist" result.
+    ///
+    /// Convenience for callers that don't care whether the key was present
+    /// (e.g. clearing an attempt counter that may not have been set).
+    pub async fn del_ignore_missing(&mut self, key: &str) -> Result<()> {
+        self.del(key).await.map(|_| ())
     }
 
     /// Get all keys matching a glob pattern (use sparingly).
@@ -164,6 +173,20 @@ mod tests {
         let removed = cache.del(key).await.expect("del");
         assert!(removed);
         assert_eq!(cache.get(key).await.expect("get"), None);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_del_ignore_missing() {
+        let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
+        let mut cache = Cache::connect(&url).await.expect("connect");
+
+        let key = "test:cache:del_ignore_missing";
+        cache.set(key, "x").await.expect("set");
+        cache.del_ignore_missing(key).await.expect("del");
+        assert_eq!(cache.get(key).await.expect("get"), None);
+        // Second call on a missing key must not error.
+        cache.del_ignore_missing(key).await.expect("del missing");
     }
 
     #[tokio::test]

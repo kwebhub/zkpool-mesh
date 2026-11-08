@@ -96,3 +96,9 @@ docs/
 # ============================================================
 services/merkle/circuits/
 web/public/circuits/
+
+# ============================================================
+# Bootstrap cache (Go, sunspot, docker image tarballs, installers).
+# Repopulated by `make bootstrap`. Never committed.
+# ============================================================
+cache/

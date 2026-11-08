@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-zk_pool = "FL2H8tCBrWBUPYKEAFjV2CWkkxjH2sGcw9N4o7ec8oL4"
+zk_pool = "Cu8M8g1YdaAic3xNXvAHFoQerfwZJPXGToW1HKEvn7jH"
 
 [programs.localnet]
 zk_pool = "DWBZd4pFkK15DQXqhFHkLt7WbrZes2HTuXpiCGxfRHtW"

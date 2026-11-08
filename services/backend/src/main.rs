@@ -40,7 +40,6 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Arc::new(Config::from_env()?);
-    eprintln!("DEBUG hello");
     logging::init_logging()?;
     info!("logging initialized");
     metrics::init_metrics()?;
@@ -313,20 +312,30 @@ async fn get_proof(
             .into_response();
     }
 
-    if q.leaf_index as usize >= rows.len() {
+    // `rows` contains only existing leaves; leaf_index values may be sparse
+    // (gaps after failed txs, partial indexing, etc.). The Merkle service
+    // expects a dense array where position == leaf_index. So we:
+    //   - bound-check against `max_leaf_index`, not `rows.len()`;
+    //   - build a dense commitments array, filling gaps with zero leaves.
+    let max_leaf_index = rows.iter().map(|c| c.leaf_index as u64).max().unwrap_or(0);
+
+    if q.leaf_index > max_leaf_index {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({
                 "error": "leaf_index out of range",
-                "count": rows.len(),
+                "max_leaf_index": max_leaf_index,
                 "leaf_index": q.leaf_index,
             })),
         )
             .into_response();
     }
 
-    // Build commitments list (bare hex) for the Merkle service.
-    let commitments: Vec<String> = rows.iter().map(|c| hex::encode(&c.commitment)).collect();
+    let mut commitments: Vec<String> =
+        vec!["0".repeat(64); (max_leaf_index + 1) as usize];
+    for c in &rows {
+        commitments[c.leaf_index as usize] = hex::encode(&c.commitment);
+    }
 
     let url = format!("{}/proof", state.config.merkle_url);
     let body = json!({
@@ -561,6 +570,11 @@ async fn post_withdraw(
         }
     } else if status.is_client_error() {
         let body: String = resp.text().await.unwrap_or_default();
+        tracing::warn!(
+            "prover 4xx: status={}, body={}",
+            status.as_u16(),
+            body
+        );
         (
             StatusCode::BAD_REQUEST,
             Json(json!({

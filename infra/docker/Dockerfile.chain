@@ -1,0 +1,38 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+  LANG=C.UTF-8 \
+  TZ=UTC
+
+USER root
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl git build-essential pkg-config libssl-dev && \
+  rm -rf /var/lib/apt/lists/*
+
+USER ubuntu
+SHELL ["/bin/bash", "-c"]
+WORKDIR /home/ubuntu
+
+ENV PATH="/home/ubuntu/.local/share/solana/install/active_release/bin:/home/ubuntu/.cargo/bin:/home/ubuntu/.nargo/bin:/home/ubuntu/.local/bin:/opt/go/bin:${PATH}"
+
+# Toolchain from cache (no network).
+COPY --chown=ubuntu:ubuntu cache/go                /opt/go
+COPY --chown=ubuntu:ubuntu cache/anchor/anchor     /home/ubuntu/.local/bin/anchor
+COPY --chown=ubuntu:ubuntu cache/sunspot           /home/ubuntu/sunspot
+
+# Installers from cache.
+COPY --chown=ubuntu:ubuntu cache/solana-install/install.sh /tmp/install-solana.sh
+COPY --chown=ubuntu:ubuntu cache/nargo/install.sh          /tmp/install-nargo.sh
+
+RUN echo 'export GNARK_VERIFIER_BIN="$HOME/sunspot/gnark-solana/crates/verifier-bin"' >> /home/ubuntu/.bashrc && \
+  bash /tmp/install-solana.sh && \
+  bash /tmp/install-nargo.sh && \
+  chmod +x /home/ubuntu/.local/bin/anchor && \
+  anchor --version && \
+  solana --version && \
+  nargo --version && \
+  /opt/go/bin/go version
+
+CMD ["/bin/bash"]

@@ -35,6 +35,8 @@ export async function poseidon2Hash(left, right) {
     left: "0x" + left,
     right: "0x" + right,
   });
-  // returnValue is a 0x-prefixed hex string; strip the prefix.
-  return result.returnValue.slice(2);
+  // returnValue is a 0x-prefixed hex string; strip the prefix and
+  // left-pad to 64 chars (leading zero bytes are elided by noir_js).
+  const hex = result.returnValue.slice(2);
+  return hex.padStart(64, "0");
 }

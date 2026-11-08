@@ -13,8 +13,8 @@
 //!   4. Parse `Program data:` log entries, match against known event
 //!      discriminators.
 //!   5. On match: save to DB, update the tree, emit a metric.
-//!   6. Remember the last processed signature in Redis
-//!      (`indexer:last_signature`).
+//!   6. Advance `last_processed` **only** on success. On failure, retry
+//!      the same signature on the next tick (bounded by `MAX_ATTEMPTS`).
 //!
 //! ## Deduplication
 //!
@@ -58,6 +58,16 @@ pub const WITHDRAW_EVENT_DISCRIMINATOR: [u8; 8] = [22, 9, 133, 26, 160, 44, 71, 
 
 /// Redis key for the last processed signature.
 const LAST_SIGNATURE_KEY: &str = "indexer:last_signature";
+
+/// Redis key for the per-signature attempt counter (failure tracking).
+const ATTEMPTS_KEY_PREFIX: &str = "indexer:attempts:";
+
+/// Maximum attempts to process the same signature before skipping it.
+const MAX_ATTEMPTS: u32 = 5;
+
+/// RPC retry policy.
+const RPC_RETRIES: u32 = 3;
+const RPC_RETRY_DELAY_MS: u64 = 500;
 
 /// Parsed DepositEvent.
 #[derive(Debug, Clone)]
@@ -127,17 +137,13 @@ impl Indexer {
     async fn poll_once(&self) -> Result<()> {
         let program_id = &self.config.program_id;
 
-        let mut before: Option<String> = None;
-        let mut all_signatures: Vec<String> = Vec::new();
-
-        // Paginate backwards until we hit the last processed signature
-        // (or the page limit).
         let last_processed = {
             let mut cache = self.cache.lock().await;
-            let v = cache.get(LAST_SIGNATURE_KEY).await?;
-            eprintln!("DEBUG last_processed = {:?}", v);
-            v
+            cache.get(LAST_SIGNATURE_KEY).await?
         };
+
+        let mut before: Option<String> = None;
+        let mut all_signatures: Vec<String> = Vec::new();
 
         for _page in 0..self.config.indexer_max_pages {
             let sigs = self.fetch_signatures(program_id, before.as_deref()).await?;
@@ -168,16 +174,47 @@ impl Indexer {
         all_signatures.reverse();
 
         for sig in &all_signatures {
-            if let Err(e) = self.process_transaction(sig).await {
-                warn!("failed to process {}: {:#}", sig, e);
-                metrics::record_indexer_error();
-            }
-        }
+            match self.process_transaction(sig).await {
+                Ok(()) => {
+                    // Success: advance last_processed and clear attempts.
+                    {
+                        let mut cache = self.cache.lock().await;
+                        cache.set(LAST_SIGNATURE_KEY, sig).await?;
+                        cache.del(&format!("{}{}", ATTEMPTS_KEY_PREFIX, sig)).await?;
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to process {}: {:#}", sig, e);
+                    metrics::record_indexer_error();
 
-        // Remember the newest processed signature (last in reversed order).
-        if let Some(newest) = all_signatures.last() {
-            let mut cache = self.cache.lock().await;
-            cache.set(LAST_SIGNATURE_KEY, newest).await?;
+                    // Bounded retry: after MAX_ATTEMPTS, skip the signature
+                    // so the indexer can make progress on later txs.
+                    let attempts_key = format!("{}{}", ATTEMPTS_KEY_PREFIX, sig);
+                    let attempts = {
+                        let mut cache = self.cache.lock().await;
+                        let n: u32 = cache
+                            .get(&attempts_key)
+                            .await?
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        let n = n + 1;
+                        cache.set(&attempts_key, &n.to_string()).await?;
+                        n
+                    };
+                    if attempts >= MAX_ATTEMPTS {
+                        warn!(
+                            "skipping {} after {} attempts (last error: {:#})",
+                            sig, attempts, e
+                        );
+                        let mut cache = self.cache.lock().await;
+                        cache.set(LAST_SIGNATURE_KEY, sig).await?;
+                        cache.del(&attempts_key).await?;
+                    }
+                    // Stop this cycle: keep last_processed where it was so
+                    // the same batch is retried next tick.
+                    return Ok(());
+                }
+            }
         }
 
         Ok(())
@@ -206,17 +243,7 @@ impl Indexer {
             "params": params,
         });
 
-        let resp: serde_json::Value = self
-            .http
-            .post(&self.config.solana_rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .context("RPC request failed")?
-            .json()
-            .await
-            .context("RPC response not JSON")?;
-
+        let resp = self.rpc_call(&body).await?;
         let arr = resp
             .get("result")
             .and_then(|r| r.as_array())
@@ -232,6 +259,11 @@ impl Indexer {
     }
 
     /// Fetch a transaction and parse events from its logs.
+    ///
+    /// Returns `Ok(())` in three cases:
+    ///   - transaction found and processed (or had no matching events);
+    ///   - transaction explicitly reported as `null` by RPC (skipped);
+    ///   - transaction found but logs had no `Program data:` entries.
     async fn process_transaction(&self, signature: &str) -> Result<()> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
@@ -243,22 +275,18 @@ impl Indexer {
             ],
         });
 
-        let resp: serde_json::Value = self
-            .http
-            .post(&self.config.solana_rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .context("RPC getTransaction failed")?
-            .json()
-            .await
-            .context("RPC getTransaction not JSON")?;
+        let resp = self.rpc_call(&body).await?;
 
         let result = match resp.get("result") {
             Some(r) if !r.is_null() => r,
             _ => {
-                debug!("transaction {} not found (skipped)", signature);
-                return Ok(());
+                // RPC does not have this transaction (yet). Treat as
+                // non-fatal: the signature has been seen in
+                // `getSignaturesForAddress` but not yet indexed. Retry on
+                // the next tick; the bounded-attempt counter prevents an
+                // infinite loop.
+                warn!("transaction {} not found on RPC (will retry)", signature);
+                return Err(anyhow!("transaction not found: {}", signature));
             }
         };
 
@@ -277,7 +305,6 @@ impl Indexer {
                 Some(s) => s,
                 None => continue,
             };
-            // Anchor emits events as: "Program data: <base64>"
             if let Some(b64) = s.strip_prefix("Program data: ") {
                 if let Ok(bytes) =
                     base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
@@ -288,6 +315,31 @@ impl Indexer {
         }
 
         Ok(())
+    }
+
+    /// POST a JSON-RPC request with retries.
+    async fn rpc_call(&self, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..RPC_RETRIES {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_millis(RPC_RETRY_DELAY_MS * attempt as u64))
+                    .await;
+            }
+            match self
+                .http
+                .post(&self.config.solana_rpc_url)
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(resp) => match resp.json::<serde_json::Value>().await {
+                    Ok(v) => return Ok(v),
+                    Err(e) => last_err = Some(anyhow!("RPC response not JSON: {:#}", e)),
+                },
+                Err(e) => last_err = Some(anyhow!("RPC request failed: {:#}", e)),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow!("RPC failed")))
     }
 
     /// Try to parse a single `Program data:` payload as a DepositEvent or
@@ -324,13 +376,6 @@ impl Indexer {
 
     /// Handle a parsed DepositEvent: save to DB, update tree.
     async fn handle_deposit(&self, signature: &str, evt: DepositEvent) -> Result<()> {
-        // Idempotency: if commitment already exists, skip.
-        // if self.db.commitment_exists(&evt.commitment).await? {
-        //     debug!("commitment already indexed, skipping");
-        //     return Ok(());
-        // }
-        // Idempotency: if commitment already exists in DB, still add to tree
-        // (Redis may have been flushed; tree must be rebuilt).
         let already_in_db = self.db.commitment_exists(&evt.commitment).await?;
 
         self.db
@@ -351,25 +396,35 @@ impl Indexer {
             )
             .await?;
 
-        // Update the incremental tree.
-        let leaf_hex = hex::encode(evt.commitment);
-        let mut tree = self.tree.lock().await;
-        match tree.add_leaf(&leaf_hex).await {
-            Ok(root) => {
-                debug!(
-                    "tree updated: leaf_index={}, new_root={}",
-                    evt.leaf_index, root
-                );
-                let size = tree.size().await.unwrap_or(0);
-                metrics::set_tree_size(size as f64);
+        // Only update the incremental tree on first sight. Re-processing
+        // the same commitment would corrupt the tree (it would be added
+        // again at the next leaf position).
+        if !already_in_db {
+            let leaf_hex = hex::encode(evt.commitment);
+            let mut tree = self.tree.lock().await;
+            match tree.add_leaf(&leaf_hex).await {
+                Ok(root) => {
+                    debug!(
+                        "tree updated: leaf_index={}, new_root={}",
+                        evt.leaf_index, root
+                    );
+                    let size = tree.size().await.unwrap_or(0);
+                    metrics::set_tree_size(size as f64);
+                }
+                Err(e) => {
+                    warn!("tree update failed: {:#}", e);
+                    metrics::record_tree_error();
+                }
             }
-            Err(e) => {
-                warn!("tree update failed: {:#}", e);
-                metrics::record_tree_error();
-            }
+        } else {
+            debug!(
+                "commitment already in DB, tree untouched: leaf_index={}",
+                evt.leaf_index
+            );
         }
 
         metrics::record_deposit();
+        let leaf_hex = hex::encode(evt.commitment);
         info!(
             "deposit indexed: leaf_index={}, commitment={}",
             evt.leaf_index,
@@ -398,7 +453,6 @@ impl Indexer {
             )
             .await?;
 
-        // Invalidate pool caches (commitments + root).
         {
             let mut cache = self.cache.lock().await;
             cache.invalidate_pool(&self.config.pool_address).await?;
@@ -477,13 +531,9 @@ mod tests {
     #[test]
     fn test_parse_deposit_event() {
         let mut payload = vec![0u8; 80];
-        // commitment = [0x11; 32]
         payload[0..32].copy_from_slice(&[0x11u8; 32]);
-        // leaf_index = 42
         payload[32..40].copy_from_slice(&42u64.to_le_bytes());
-        // new_root = [0x22; 32]
         payload[40..72].copy_from_slice(&[0x22u8; 32]);
-        // timestamp = 1_700_000_000
         payload[72..80].copy_from_slice(&1_700_000_000i64.to_le_bytes());
 
         let evt = parse_deposit_event(&payload).expect("parse");

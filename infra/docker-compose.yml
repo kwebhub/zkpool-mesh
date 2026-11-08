@@ -26,10 +26,10 @@ services:
       - "4002:4002" # prover
       - "4003:4003" # merkle
       - "5173:5173" # vite dev server
-    # `network_mode: host` is NOT used. The solana container needs to reach
+    # network_mode: host is NOT used. The solana container needs to reach
     # Postgres and Redis by their service names on the default bridge network.
-    # For local dev, the backend (running inside `solana`) connects to
-    # `postgres:5432` and `redis:6379` — see `.env.example`.
+    # For local dev, the backend (running inside solana) connects to
+    # postgres:5432 and redis:6379 — see .env.example.
     depends_on:
       - postgres
       - redis
