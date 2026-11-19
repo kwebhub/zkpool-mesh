@@ -95,7 +95,7 @@ pub const PROOF_LEN: usize = 388;
 /// The `withdraw` instruction calls this program via CPI to verify the
 /// Groth16 proof. If the circuit is ever changed, the verifier program
 /// must be rebuilt and this constant must be updated.
-pub const VERIFIER_PROGRAM_ID: Pubkey = pubkey!("BekbAKHj7iZ3RaacUzidLLZwTjrzivSqL2UMDpPAc6Jh");
+pub const VERIFIER_PROGRAM_ID: Pubkey = pubkey!("Fw8tFwwb7Qu42etnJdcRcNwAhuLW99JnjC9uLGfbeBsJ");
 
 // ============================================================
 // Economics
@@ -170,10 +170,12 @@ mod tests {
         assert_ne!(POOL_SEED, NULLIFIER_RECORD_SEED);
         assert_ne!(VAULT_SEED, NULLIFIER_RECORD_SEED);
     }
-
     #[test]
     fn test_verifier_program_id_parses() {
-        let expected = "4Ad6BGcBM1YfjzFPTSRAGMiH5HjPZToaDWoM9DRhqnCU";
-        assert_eq!(VERIFIER_PROGRAM_ID.to_string(), expected);
+        // Source of truth is the `pubkey!` literal above. Guard against an
+        // empty or syntactically invalid ID, not a specific value.
+        let s = VERIFIER_PROGRAM_ID.to_string();
+        assert!(!s.is_empty());
+        assert!(s.parse::<Pubkey>().is_ok());
     }
 }

@@ -1,4 +1,33 @@
 services:
+  zkpool-base:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.base
+    image: zkpool-base:latest
+    profiles: ["build-only"]
+  solana-test-validator:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.test
+    container_name: zkpool-mesh-test-validator
+    security_opt:
+      - seccomp:unconfined
+    ports:
+      - "8899:8899"
+      - "9900:9900"
+    volumes:
+      - zkpool-mesh-test-validator-ledger:/root/.ledger
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "solana -u http://localhost:8899 cluster-version || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
   solana:
     build:
       context: ..
@@ -33,6 +62,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - solana-test-validator
     restart: unless-stopped
 
   postgres:
@@ -105,3 +135,4 @@ volumes:
   zkpool-mesh-redis-data:
   zkpool-mesh-prometheus-data:
   zkpool-mesh-grafana-data:
+  zkpool-mesh-test-validator-ledger:

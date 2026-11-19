@@ -1,0 +1,33 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+  LANG=C.UTF-8 \
+  TZ=UTC
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  ca-certificates curl git build-essential pkg-config libssl-dev && \
+  rm -rf /var/lib/apt/lists/*
+
+RUN id -u ubuntu >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash ubuntu
+
+USER ubuntu
+SHELL ["/bin/bash", "-c"]
+WORKDIR /home/ubuntu
+
+ENV PATH="/home/ubuntu/.local/share/solana/install/active_release/bin:/home/ubuntu/.cargo/bin:/home/ubuntu/.nargo/bin:/home/ubuntu/.local/bin:/opt/go/bin:${PATH}"
+
+# Shared toolchain (no network).
+COPY --chown=ubuntu:ubuntu cache/sunspot                   /home/ubuntu/sunspot
+COPY --chown=ubuntu:ubuntu cache/solana-install/install.sh /tmp/install-solana.sh
+COPY --chown=ubuntu:ubuntu cache/nargo/install.sh          /tmp/install-nargo.sh
+
+RUN echo 'export GNARK_VERIFIER_BIN="$HOME/sunspot/gnark-solana/crates/verifier-bin"' >> /home/ubuntu/.bashrc && \
+  bash /tmp/install-solana.sh && \
+  bash /tmp/install-nargo.sh && \
+  export PATH="$HOME/.nargo/bin:$PATH" && \
+  noirup && \
+  nargo --version && \
+  solana --version
+
+CMD ["/bin/bash"]
