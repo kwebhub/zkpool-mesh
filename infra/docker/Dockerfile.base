@@ -1,33 +1,53 @@
-FROM ubuntu:24.04
+FROM debian:13
 
 ENV DEBIAN_FRONTEND=noninteractive \
   LANG=C.UTF-8 \
   TZ=UTC
 
-RUN apt-get update && \
-  apt-get install -y --no-install-recommends \
-  ca-certificates curl git build-essential pkg-config libssl-dev && \
-  rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  libssl3 \
+  libudev1 \
+  libclang-dev \
+  protobuf-compiler \
+  curl \
+  git \
+  build-essential \
+  pkg-config \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN id -u ubuntu >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash ubuntu
+RUN useradd -m -u 1000 -s /bin/bash i
 
-USER ubuntu
+USER i
 SHELL ["/bin/bash", "-c"]
-WORKDIR /home/ubuntu
+WORKDIR /home/i
 
-ENV PATH="/home/ubuntu/.local/share/solana/install/active_release/bin:/home/ubuntu/.cargo/bin:/home/ubuntu/.nargo/bin:/home/ubuntu/.local/bin:/opt/go/bin:${PATH}"
+ENV HOME=/home/i \
+  CARGO_HOME=/home/i/.cargo \
+  RUSTUP_HOME=/home/i/.rustup \
+  PATH=/home/i/.local/share/solana/install/active_release/bin:/home/i/.cargo/bin:/home/i/.local/bin:/home/i/.avm/bin:/opt/go/bin:${PATH}
 
-# Shared toolchain (no network).
-COPY --chown=ubuntu:ubuntu cache/sunspot                   /home/ubuntu/sunspot
-COPY --chown=ubuntu:ubuntu cache/solana-install/install.sh /tmp/install-solana.sh
-COPY --chown=ubuntu:ubuntu cache/nargo/install.sh          /tmp/install-nargo.sh
+COPY --chown=i:i cache/solana-dev/bin/ /home/i/.local/bin/
+COPY --chown=i:i cache/solana-dev/avm/ /home/i/.avm/
+COPY --chown=i:i cache/solana-dev/rustup/ /home/i/.rustup/
 
-RUN echo 'export GNARK_VERIFIER_BIN="$HOME/sunspot/gnark-solana/crates/verifier-bin"' >> /home/ubuntu/.bashrc && \
-  bash /tmp/install-solana.sh && \
-  bash /tmp/install-nargo.sh && \
-  export PATH="$HOME/.nargo/bin:$PATH" && \
-  noirup && \
-  nargo --version && \
-  solana --version
+RUN mkdir -p /home/i/.local/share/solana/install/active_release/bin && \
+  cp /home/i/.local/bin/solana* /home/i/.local/share/solana/install/active_release/bin/ && \
+  cp /home/i/.local/bin/agave-* /home/i/.local/share/solana/install/active_release/bin/ 2>/dev/null || true
+
+COPY --chown=i:i cache/cargo-bin/ /home/i/.cargo/bin/
+COPY --chown=i:i cache/go/ /opt/go/
+COPY --chown=i:i cache/sunspot/ /home/i/sunspot/
+COPY --chown=i:i cache/nargo/nargo /home/i/.local/bin/nargo
+
+RUN solana --version && \
+  anchor --version && \
+  rustc --version && \
+  cargo-deny --version && \
+  cargo-audit --version && \
+  /opt/go/bin/go version && \
+  /home/i/.local/bin/nargo --version
+
+ENV GNARK_VERIFIER_BIN=/home/i/sunspot/gnark-solana/crates/verifier-bin
 
 CMD ["/bin/bash"]

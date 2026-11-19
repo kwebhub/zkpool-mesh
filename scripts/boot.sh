@@ -161,6 +161,7 @@ boot_solana_dev() {
       # Rust
       curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
       . "$HOME/.cargo/env"
+      rustup default stable
 
       # Solana CLI / Agave (standalone installer, no Surfpool)
       sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
@@ -198,6 +199,8 @@ boot_solana_dev() {
       cp -a "$HOME/.local/share/solana/install/active_release/bin/." /cache/solana-dev/bin/
       cp -a "$HOME/.cargo/bin/." /cache/solana-dev/bin/ 2>/dev/null || true
       cp -a "$HOME/.avm/bin/." /cache/solana-dev/bin/ 2>/dev/null || true
+      cp -a "$HOME/.avm/." /cache/solana-dev/avm/ 2>/dev/null || true
+      cp -a "$HOME/.rustup/." /cache/solana-dev/rustup/ 2>/dev/null || true
       if [ -L /cache/solana-dev/bin/anchor ]; then
         target="$(readlink -f /cache/solana-dev/bin/anchor)"
         if [ -x "$target" ] && [ "$target" != "/cache/solana-dev/bin/anchor" ]; then
@@ -209,7 +212,12 @@ boot_solana_dev() {
         [ -f "$f" ] && cp "$f" /cache/cargo-bin/
       done
       node_bin="$(command -v node)"
-      [ -n "$node_bin" ] && cp -a "$(dirname "$node_bin")/." /cache/solana-dev/node/bin/
+      if [ -n "$node_bin" ]; then
+        node_root="$(dirname "$(dirname "$node_bin")")"
+        mkdir -p /cache/solana-dev/node
+        cp -a "$node_root/bin" /cache/solana-dev/node/
+        cp -a "$node_root/lib" /cache/solana-dev/node/ 2>/dev/null || true
+      fi
     '
   [ -e "$bin_dir/anchor" ] || die "anchor binary missing in cache"
   [ -x "$bin_dir/solana" ] || die "solana binary missing in cache"
@@ -245,6 +253,7 @@ boot_sunspot() {
     "$BUILDER_IMAGE" \
     bash -lc 'export PATH=/opt/go/bin:$PATH && cd cmd/sunspot && go build -buildvcs=false -o /src/go/sunspot .'
   [ -x "$repo/go/sunspot" ] || die "sunspot build failed"
+  rm -rf "$repo/.git" "$repo/.github"
   log "  sunspot binary: $repo/go/sunspot"
 }
 
@@ -277,8 +286,8 @@ boot_nargo() {
 boot_pnpm() {
   log "pnpm"
   local dir="$CACHE/pnpm"
-  if [ -x "$dir/pnpm" ]; then
-    skip "pnpm: $("$dir/pnpm" --version 2>/dev/null || echo present)"
+  if [ -x "$dir/bin/pnpm" ]; then
+    skip "pnpm: $("$dir/bin/pnpm" --version 2>/dev/null || echo present)"
     return
   fi
   mkdir -p "$dir"
@@ -294,12 +303,11 @@ boot_pnpm() {
       set -e
       curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION="$PNPM_VERSION" sh -
       export PNPM_HOME="$HOME/.local/share/pnpm"
-      export PATH="$PNPM_HOME:$PATH"
-      cp "$PNPM_HOME/bin/pnpm" /out/pnpm
-      chmod +x /out/pnpm
+      export PATH="$PNPM_HOME/bin:$PATH"
+      cp -a "$PNPM_HOME/." /out/
     '
-  [ -x "$dir/pnpm" ] || die "pnpm install failed"
-  log "  pnpm binary: $dir/pnpm"
+  [ -x "$dir/bin/pnpm" ] || die "pnpm install failed"
+  log "  pnpm home: $dir"
 }
 
 boot_images() {
@@ -307,7 +315,7 @@ boot_images() {
   local dir="$CACHE/images"
   mkdir -p "$dir"
   local images=(
-    "ubuntu:24.04"
+    "debian:13"
     "postgres:16-alpine"
     "redis:7-alpine"
     "prom/prometheus:v2.55.0"
@@ -324,6 +332,12 @@ boot_images() {
     log "  pulling $img"
     docker pull "$img"
     docker save -o "$dir/$fname" "$img"
+  done
+  log "  loading images into local docker"
+  for img in "${images[@]}"; do
+    local fname
+    fname="$(printf '%s' "$img" | tr '/:' '__').tar"
+    docker load -i "$dir/$fname" >/dev/null
   done
 }
 
