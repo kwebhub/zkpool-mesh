@@ -1,14 +1,9 @@
 services:
-  zkpool-base:
-    build:
-      context: ..
-      dockerfile: infra/docker/Dockerfile.base
-    image: zkpool-base:latest
-    profiles: ["build-only"]
   solana-test-validator:
     build:
       context: ..
       dockerfile: infra/docker/Dockerfile.test
+    image: zkpool-test:latest
     container_name: zkpool-mesh-test-validator
     security_opt:
       - seccomp:unconfined
@@ -16,7 +11,7 @@ services:
       - "8899:8899"
       - "9900:9900"
     volumes:
-      - zkpool-mesh-test-validator-ledger:/root/.ledger
+      - zkpool-mesh-test-validator-ledger:/home/i/.ledger
     healthcheck:
       test:
         [
@@ -27,42 +22,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 15s
-    restart: unless-stopped
-  solana:
-    build:
-      context: ..
-      dockerfile: infra/docker/Dockerfile.mesh
-    container_name: zkpool-mesh-app
-    stdin_open: true
-    tty: true
-
-    working_dir: /home/ubuntu
-    volumes:
-      - ../onchain:/home/ubuntu/onchain
-      - ../circuits:/home/ubuntu/circuits
-      - ../services:/home/ubuntu/services
-      - ../web:/home/ubuntu/web
-      - ../scripts:/home/ubuntu/scripts
-      - ../tests:/home/ubuntu/tests
-      - ../solana:/home/ubuntu/.config/solana
-      - ../deny.toml:/home/ubuntu/deny.toml:ro
-      - ../Makefile:/home/ubuntu/Makefile:ro
-      - ../.env:/home/ubuntu/.env
-    environment:
-      - CARGO_TERM_COLOR=always
-    ports:
-      - "4001:4001" # backend
-      - "4002:4002" # prover
-      - "4003:4003" # merkle
-      - "5173:5173" # vite dev server
-    # network_mode: host is NOT used. The solana container needs to reach
-    # Postgres and Redis by their service names on the default bridge network.
-    # For local dev, the backend (running inside solana) connects to
-    # postgres:5432 and redis:6379 — see .env.example.
-    depends_on:
-      - postgres
-      - redis
-      - solana-test-validator
     restart: unless-stopped
 
   postgres:
@@ -98,6 +57,74 @@ services:
     command: redis-server --appendonly yes
     restart: unless-stopped
 
+  merkle:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.merkle
+    image: zkpool-merkle:latest
+    container_name: zkpool-mesh-merkle
+    working_dir: /home/i/services/merkle
+    volumes:
+      - ../services/merkle:/home/i/services/merkle
+      - ../circuits:/home/i/circuits:ro
+    ports:
+      - "4003:4003"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prover:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.backend
+    image: zkpool-backend:latest
+    container_name: zkpool-mesh-prover
+    working_dir: /home/i/services/prover
+    volumes:
+      - ../services/prover:/home/i/services/prover
+      - ../circuits:/home/i/circuits:ro
+      - ../.env:/home/i/.env
+    ports:
+      - "4002:4002"
+    depends_on:
+      solana-test-validator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.backend
+    image: zkpool-backend:latest
+    container_name: zkpool-mesh-backend
+    working_dir: /home/i/services/backend
+    volumes:
+      - ../services/backend:/home/i/services/backend
+      - ../.env:/home/i/.env
+    ports:
+      - "4001:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      solana-test-validator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.frontend
+    image: zkpool-frontend:latest
+    container_name: zkpool-mesh-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v2.55.0
     container_name: zkpool-mesh-prometheus
@@ -111,7 +138,9 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=7d"
     depends_on:
-      - solana
+      - backend
+      - prover
+      - merkle
     restart: unless-stopped
 
   grafana:
