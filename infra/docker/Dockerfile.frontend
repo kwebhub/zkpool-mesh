@@ -1,0 +1,14 @@
+FROM zkpool-node-base:latest AS build
+
+USER i
+SHELL ["/bin/bash", "-c"]
+WORKDIR /home/i/web
+
+COPY --chown=i:i web/ /home/i/web/
+RUN pnpm install --frozen-lockfile && pnpm build
+
+FROM nginx:alpine AS runtime
+
+COPY --from=build /home/i/web/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

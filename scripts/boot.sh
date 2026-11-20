@@ -374,6 +374,9 @@ main() {
   boot_images
   boot_wallet
 
+  log "removing builder image"
+  docker rmi -f "$BUILDER_IMAGE" >/dev/null 2>&1 || true
+
   log "boot complete"
   du -sh "$CACHE"/* 2>/dev/null || true
 }

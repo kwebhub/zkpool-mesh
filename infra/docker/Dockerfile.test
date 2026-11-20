@@ -1,0 +1,29 @@
+FROM debian:13
+
+ENV DEBIAN_FRONTEND=noninteractive \
+  LANG=C.UTF-8 \
+  TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  libssl3 \
+  libudev1 \
+  curl \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 -s /bin/bash i
+
+USER i
+SHELL ["/bin/bash", "-c"]
+WORKDIR /home/i
+
+ENV HOME=/home/i \
+  PATH=/home/i/.local/share/solana/install/active_release/bin:${PATH}
+
+COPY --chown=i:i cache/solana-dev/bin/ /home/i/.local/share/solana/install/active_release/bin/
+
+RUN solana --version && solana-test-validator --version
+
+EXPOSE 8899 9900
+
+CMD ["solana-test-validator", "--reset", "--rpc-port", "8899", "--faucet-port", "9900", "--ledger", "/home/i/.ledger"]
