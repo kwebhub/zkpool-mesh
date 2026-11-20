@@ -1,20 +1,15 @@
 SHELL := /bin/bash
 
-COMPOSE   := docker compose -f infra/compose.yml
-PG    := zkpool-mesh-postgres
-REDIS := zkpool-mesh-redis
+COMPOSE := docker compose -f infra/compose.yml
 
-# Test recipient for E2E withdrawals (local validator, demo-only — no real value).
+PG    := zkpool-postgres
+REDIS := zkpool-redis
+
 E2E_RECIPIENT := $(shell grep -E '^E2E_RECIPIENT=' .env 2>/dev/null | cut -d= -f2)
 
 BASE_IMAGE      := zkpool-base:latest
 NODE_BASE_IMAGE := zkpool-node-base:latest
 TEST_IMAGE      := zkpool-test:latest
-BACKEND_IMAGE   := zkpool-backend:latest
-ANCHOR_IMAGE    := zkpool-anchor:latest
-CIRCUITS_IMAGE  := zkpool-circuits:latest
-SCRIPTS_IMAGE   := zkpool-scripts:latest
-MERKLE_IMAGE    := zkpool-merkle:latest
 FRONTEND_IMAGE  := zkpool-frontend:latest
 
 LOCAL_RPC := http://solana-test-validator:8899
@@ -28,8 +23,7 @@ CHAIN_VOLUMES := \
   -v $(CURDIR)/scripts:/home/i/scripts \
   -v $(CURDIR)/.secrets:/home/i/.secrets
 
-anchor_run := docker run --rm --network $(COMPOSE_NETWORK) -e GNARK_VERIFIER_BIN=/home/i/sunspot/gnark-solana/crates/verifier-bin $(CHAIN_VOLUMES) -w /home/i $(ANCHOR_IMAGE) bash -c
-circuits_run := docker run --rm --network $(COMPOSE_NETWORK) -e GNARK_VERIFIER_BIN=/home/i/sunspot/gnark-solana/crates/verifier-bin $(CHAIN_VOLUMES) -w /home/i $(CIRCUITS_IMAGE) bash -c
+mesh_run := docker run --rm --network $(COMPOSE_NETWORK) -e GNARK_VERIFIER_BIN=/home/i/sunspot/gnark-solana/crates/verifier-bin $(CHAIN_VOLUMES) -w /home/i $(BASE_IMAGE) bash -c
 
 .PHONY: help boot build-images up down migrations infra wipe chain chain-close \
         validate-spec sync sync-check check deps mesh services stack \
@@ -42,14 +36,13 @@ help:
 	@echo "    make boot          warm cache/ + create wallet"
 	@echo ""
 	@echo "  zone 2:"
-	@echo "    make build-images  build zkpool-base, node-base, per-part images"
+	@echo "    make build-images  build zkpool-base, node-base, test, frontend"
 	@echo "    make up            docker compose up"
 	@echo "    make migrations    apply SQL migrations to postgres"
 	@echo "    make down          docker compose down"
 	@echo "    make infra         build-images + up + migrations"
 	@echo ""
 	@echo "  zone 3:"
-	@echo "    make keygen        show wallet balance (boot creates wallet)"
 	@echo "    make chain         deploy verifier + zk_pool + pool-init"
 	@echo "    make chain-close   close old programs from cache/old-programs.txt"
 	@echo "    make sync-ids      verify PROGRAM_ID / VERIFIER_PROGRAM_ID match .env"
@@ -62,7 +55,7 @@ help:
 	@echo "    make deps          pnpm install in merkle and frontend"
 	@echo "    make mesh          cargo build backend/prover + pnpm build web"
 	@echo "    make e2e-build     build e2e binaries"
-	@echo "    make services      restart merkle/prover/backend + health checks"
+	@echo "    make services      restart merkle/backend + health checks"
 	@echo "    make stack         validate-spec + sync + check + deps + mesh + e2e-build + services"
 	@echo "    make e2e           deposit → wait indexer → withdraw (1 note)"
 	@echo "    make e2e-split     split deposit (3 notes) → withdraw each"
@@ -71,7 +64,7 @@ help:
 	@echo "    make redeploy      wipe → boot → chain → infra → stack → e2e"
 	@echo "    make wipe          remove containers, volumes, images (cache/ preserved)"
 	@echo "    make status        containers + health + Postgres/Redis counts"
-	@echo "    make logs          tail merkle/prover/backend/frontend logs"
+	@echo "    make logs          tail merkle/backend/frontend logs"
 	@echo "    make verify        on-chain pool + Postgres commitments + roots + API"
 
 # ============================================================
@@ -93,16 +86,6 @@ build-images: env-check
 	@docker build -f infra/docker/Dockerfile.node-base -t $(NODE_BASE_IMAGE) .
 	@echo "==> [infra] building $(TEST_IMAGE)"
 	@docker build -f infra/docker/Dockerfile.test -t $(TEST_IMAGE) .
-	@echo "==> [infra] building $(BACKEND_IMAGE)"
-	@docker build -f infra/docker/Dockerfile.backend -t $(BACKEND_IMAGE) .
-	@echo "==> [infra] building $(ANCHOR_IMAGE)"
-	@docker build -f infra/docker/Dockerfile.anchor -t $(ANCHOR_IMAGE) .
-	@echo "==> [infra] building $(CIRCUITS_IMAGE)"
-	@docker build -f infra/docker/Dockerfile.circuits -t $(CIRCUITS_IMAGE) .
-	@echo "==> [infra] building $(SCRIPTS_IMAGE)"
-	@docker build -f infra/docker/Dockerfile.scripts -t $(SCRIPTS_IMAGE) .
-	@echo "==> [infra] building $(MERKLE_IMAGE)"
-	@docker build -f infra/docker/Dockerfile.merkle -t $(MERKLE_IMAGE) .
 	@echo "==> [infra] building $(FRONTEND_IMAGE)"
 	@docker build -f infra/docker/Dockerfile.frontend -t $(FRONTEND_IMAGE) .
 
@@ -123,21 +106,20 @@ infra: build-images up migrations
 wipe:
 	@echo "==> [infra] removing containers, volumes, images, build cache (cache/ preserved)"
 	@-$(COMPOSE) down -v --remove-orphans 2>/dev/null || true
-	@-docker rmi -f $(BASE_IMAGE) $(NODE_BASE_IMAGE) $(TEST_IMAGE) $(BACKEND_IMAGE) $(ANCHOR_IMAGE) $(CIRCUITS_IMAGE) $(SCRIPTS_IMAGE) $(MERKLE_IMAGE) $(FRONTEND_IMAGE) 2>/dev/null || true
+	@-docker rmi -f $(BASE_IMAGE) $(NODE_BASE_IMAGE) $(TEST_IMAGE) $(FRONTEND_IMAGE) 2>/dev/null || true
 	@-docker rmi -f debian:13 postgres:16-alpine redis:7-alpine prom/prometheus:v2.55.0 grafana/grafana:11.3.0 nginx:alpine 2>/dev/null || true
 	@docker builder prune -af 2>/dev/null || true
 	@docker image prune -af 2>/dev/null || true
 	@docker volume prune -af 2>/dev/null || true
 
 # ============================================================
-# Zone 3 — on-chain (circuits + anchor)
+# Zone 3 — on-chain (zkpool-base: anchor + circuits)
 # ============================================================
-#
 chain:
 	@echo "==> [chain 1/5] verify wallet + config"
-	@$(anchor_run) 'test -f /home/i/.config/solana/id.json || { echo "ERROR: solana/id.json missing"; exit 1; }; solana config set --url $(LOCAL_RPC); solana-keygen pubkey /home/i/.config/solana/id.json'
+	@$(mesh_run) 'test -f /home/i/.config/solana/id.json || { echo "ERROR: solana/id.json missing"; exit 1; }; solana config set --url $(LOCAL_RPC); solana-keygen pubkey /home/i/.config/solana/id.json'
 	@echo "==> [chain 2/5] verifier: nargo compile → sunspot compile → setup → deploy"
-	@$(circuits_run) 'set -e; export PATH=/home/i/sunspot/go:$$PATH; \
+	@$(mesh_run) 'set -e; export PATH=/home/i/sunspot/go:$$PATH; \
 	  cd /home/i/circuits/withdrawal && nargo compile && \
 	  sunspot compile target/withdrawal.json && \
 	  sunspot setup target/withdrawal.ccs && \
@@ -146,7 +128,7 @@ chain:
 	  grep -A2 "12-word seed phrase" /home/i/.secrets/deploy-verifier.log | tail -1 | sed "s/^/verifier_buffer_seed: /" >> /home/i/.secrets/keys.md; \
 	  grep -E "Program Id:|Signature:" /home/i/.secrets/deploy-verifier.log'
 	@echo "==> [chain 3/5] update constants.rs with new VERIFIER_PROGRAM_ID"
-	@$(anchor_run) 'set -e; \
+	@$(mesh_run) 'set -e; \
 	  VK_KEYPAIR=/home/i/circuits/withdrawal/target/withdrawal-keypair.json; \
 	  NEW_VERIFIER=$$(solana-keygen pubkey $$VK_KEYPAIR); \
 	  echo "   new VERIFIER_PROGRAM_ID=$$NEW_VERIFIER"; \
@@ -154,7 +136,7 @@ chain:
 	  sed "s|^VERIFIER_PROGRAM_ID=.*|VERIFIER_PROGRAM_ID=$$NEW_VERIFIER|" /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new; \
 	  grep -E "^VERIFIER_PROGRAM_ID=" /home/i/.env'
 	@echo "==> [chain 4/5] zk_pool: sync id → build → deploy"
-	@$(anchor_run) 'set -e; cd /home/i/onchain && rm -f target/deploy/zk_pool-keypair.json && \
+	@$(mesh_run) 'set -e; cd /home/i/onchain && rm -f target/deploy/zk_pool-keypair.json && \
 	  anchor build --no-idl -- --arch v0 2>&1 | tail -3; \
 	  NEW_ID=$$(solana-keygen pubkey target/deploy/zk_pool-keypair.json); \
 	  echo "   new zk_pool PROGRAM_ID=$$NEW_ID"; \
@@ -166,17 +148,17 @@ chain:
 	  solana program deploy target/deploy/zk_pool.so --program-id target/deploy/zk_pool-keypair.json --max-sign-attempts 1000 --url $(LOCAL_RPC) > /home/i/.secrets/deploy-zkpool.log 2>&1; \
 	  grep -A2 "12-word seed phrase" /home/i/.secrets/deploy-zkpool.log | tail -1 | sed "s/^/zkpool_buffer_seed: /" >> /home/i/.secrets/keys.md; \
 	  grep -E "Program Id:|Signature:" /home/i/.secrets/deploy-zkpool.log'
-	@$(anchor_run) 'set -e; NEW_PROGRAM=$$(solana-keygen pubkey /home/i/onchain/target/deploy/zk_pool-keypair.json); \
+	@$(mesh_run) 'set -e; NEW_PROGRAM=$$(solana-keygen pubkey /home/i/onchain/target/deploy/zk_pool-keypair.json); \
 	  echo "   new PROGRAM_ID=$$NEW_PROGRAM"; \
 	  sed "s|^PROGRAM_ID=.*|PROGRAM_ID=$$NEW_PROGRAM|; s|^POOL_ADDRESS=.*|POOL_ADDRESS=|" /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new; \
 	  grep -E "^(PROGRAM_ID|POOL_ADDRESS)=" /home/i/.env'
 	@echo "==> [chain 5/5] pool-init"
-	@$(anchor_run) 'set -e; cd /home/i && cargo build --release --manifest-path scripts/pool-init/Cargo.toml 2>&1 | tail -3 && \
+	@$(mesh_run) 'set -e; cd /home/i && cargo build --release --manifest-path scripts/pool-init/Cargo.toml 2>&1 | tail -3 && \
 	  ./scripts/pool-init/target/release/pool-init --rpc $(LOCAL_RPC) --keypair /home/i/.config/solana/id.json 2>&1 | tee /home/i/cache/pool-init.log'
 	@NEW_POOL=$$(grep -E "^Pool PDA:" cache/pool-init.log | awk '{print $$3}'); \
 	  [ -n "$$NEW_POOL" ] || { echo "ERROR: Pool PDA not found"; exit 1; }; \
 	  echo "   new POOL_ADDRESS=$$NEW_POOL"; \
-	  docker run --rm $(CHAIN_VOLUMES) -w /home/i $(ANCHOR_IMAGE) bash -c "sed 's|^POOL_ADDRESS=.*|POOL_ADDRESS=$$NEW_POOL|' /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new && grep -E '^POOL_ADDRESS=' /home/i/.env"
+	  docker run --rm $(CHAIN_VOLUMES) -w /home/i $(BASE_IMAGE) bash -c "sed 's|^POOL_ADDRESS=.*|POOL_ADDRESS=$$NEW_POOL|' /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new && grep -E '^POOL_ADDRESS=' /home/i/.env"
 	@$(MAKE) sync-ids
 	@echo "==> [chain] complete"
 
@@ -187,25 +169,25 @@ chain-close:
 	@while read -r kind path; do \
 	  [ -z "$$kind" ] && continue; \
 	  echo "   closing $$kind $$path"; \
-	  $(anchor_run) "solana program close --program-id $$path --url $(LOCAL_RPC) --bypass-warning" || echo "   WARN: close failed for $$path"; \
+	  $(mesh_run) "solana program close --program-id $$path --url $(LOCAL_RPC) --bypass-warning" || echo "   WARN: close failed for $$path"; \
 	done < cache/old-programs.txt
 	@: > cache/old-programs.txt
 
 # ============================================================
-# Zone 4 — stack (inside containers)
+# Zone 4 — stack
 # ============================================================
 
 validate-spec:
 	@echo "==> [stack] validate spec.json"
-	@docker run --rm $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && cargo run --manifest-path scripts/validate-spec/Cargo.toml --release -- circuits/withdrawal/spec.json'
+	@$(mesh_run) 'cd /home/i && cargo run --manifest-path scripts/validate-spec/Cargo.toml --release -- circuits/withdrawal/spec.json'
 
 sync:
 	@echo "==> [stack] sync ACIR"
-	@docker run --rm $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && cargo run --manifest-path scripts/sync-circuits/Cargo.toml --release -- apply'
+	@$(mesh_run) 'cd /home/i && cargo run --manifest-path scripts/sync-circuits/Cargo.toml --release -- apply'
 
 sync-check:
 	@echo "==> [stack] sync-circuits check (CI mode, no writes)"
-	@docker run --rm $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && cargo run --manifest-path scripts/sync-circuits/Cargo.toml --release -- check'
+	@$(mesh_run) 'cd /home/i && cargo run --manifest-path scripts/sync-circuits/Cargo.toml --release -- check'
 
 check:
 	@echo "==> [stack] check .ccs/.pk from zone 3"
@@ -215,20 +197,22 @@ check:
 
 deps:
 	@echo "==> [stack] pnpm install (merkle, frontend)"
-	@docker exec zkpool-mesh-merkle bash -lc 'cd /home/i/services/merkle && pnpm install'
-	@docker exec zkpool-mesh-frontend bash -lc 'cd /home/i/web && pnpm install'
+	@docker exec zkpool-merkle bash -lc 'cd /home/i/services/merkle && pnpm install'
+	@docker exec zkpool-web bash -lc 'cd /home/i/web && pnpm install'
 
 mesh:
 	@echo "==> [stack] build backend"
-	@docker exec zkpool-mesh-backend bash -lc 'cd /home/i/services/backend && cargo build --release'
+	@docker exec zkpool-mesh bash -lc 'cd /home/i/services/backend && cargo build --release'
 	@echo "==> [stack] build prover"
-	@docker exec zkpool-mesh-prover bash -lc 'cd /home/i/services/prover && cargo build --release'
+	@docker exec zkpool-mesh bash -lc 'cd /home/i/services/prover && cargo build --release'
 	@echo "==> [stack] build web"
-	@docker exec zkpool-mesh-frontend bash -lc 'cd /home/i/web && pnpm install --frozen-lockfile && pnpm build'
+	@docker exec zkpool-web bash -lc 'cd /home/i/web && pnpm install --frozen-lockfile && pnpm build'
 
 services:
-	@echo "==> [stack] restart merkle/prover/backend"
-	@$(COMPOSE) restart merkle prover backend
+	@echo "==> [stack] restart merkle/backend/prover"
+	@docker exec -d zkpool-merkle bash -lc 'cd /home/i/services/merkle && node src/server.js > /tmp/merkle.log 2>&1' || true
+	@docker exec -d zkpool-mesh bash -lc 'cd /home/i/services/prover && ./target/release/zkpool-prover > /tmp/prover.log 2>&1' || true
+	@docker exec -d zkpool-mesh bash -lc 'cd /home/i/services/backend && ./target/release/zkpool-backend > /tmp/backend.log 2>&1' || true
 	@sleep 5
 	@for entry in "4001 /api/health" "4002 /health" "4003 /health"; do \
 	  p=$${entry%% *}; path=$${entry##* }; \
@@ -242,7 +226,7 @@ stack: validate-spec sync check deps mesh e2e-build services
 
 e2e:
 	@echo "==> [stack] e2e deposit"
-	@docker run --rm --network $(COMPOSE_NETWORK) $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && ./scripts/e2e-deposit/target/release/e2e-deposit' 2>&1 | tee /tmp/e2e-deposit.log
+	@$(mesh_run) 'cd /home/i && ./scripts/e2e-deposit/target/release/e2e-deposit' 2>&1 | tee /tmp/e2e-deposit.log
 	@echo "==> [stack] extracting note"
 	@awk '/^=== NOTE/,/^}$$/' /tmp/e2e-deposit.log | sed '1d' > /tmp/note.json
 	@python3 -c "import json; d=json.load(open('/tmp/note.json')); d['splits']=['00000000000000000000000000000000000000000000000000000000000f4240','0000000000000000000000000000000000000000000000000000000000000000','0000000000000000000000000000000000000000000000000000000000000000']; d['note_index']=0; json.dump(d,open('/tmp/note.json','w'),indent=2)"
@@ -254,17 +238,17 @@ e2e:
 	    sleep 2; \
 	  done; \
 	  curl -s http://localhost:4001/api/commitments | grep -q "$$COMMIT" || { echo "   FAIL commitment not indexed"; exit 1; }
-	@docker cp /tmp/note.json zkpool-mesh-backend:/tmp/note.json
+	@docker cp /tmp/note.json zkpool-mesh:/tmp/note.json
 	@echo "==> [stack] e2e withdraw"
-	@docker exec zkpool-mesh-backend bash -lc 'cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note.json $(E2E_RECIPIENT)' 2>&1 | tee /tmp/e2e-withdraw.log
+	@docker exec zkpool-mesh bash -lc 'cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note.json $(E2E_RECIPIENT)' 2>&1 | tee /tmp/e2e-withdraw.log
 
 e2e-build:
 	@echo "==> [stack] build e2e binaries"
-	@docker run --rm $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && cargo build --release --manifest-path scripts/e2e-deposit/Cargo.toml && cargo build --release --manifest-path scripts/e2e-deposit-split/Cargo.toml && cargo build --release --manifest-path scripts/e2e-withdraw/Cargo.toml'
+	@$(mesh_run) 'cd /home/i && cargo build --release --manifest-path scripts/e2e-deposit/Cargo.toml && cargo build --release --manifest-path scripts/e2e-deposit-split/Cargo.toml && cargo build --release --manifest-path scripts/e2e-withdraw/Cargo.toml'
 
 e2e-split:
 	@echo "==> [stack] e2e deposit-split"
-	@docker run --rm --network $(COMPOSE_NETWORK) $(CHAIN_VOLUMES) -w /home/i $(SCRIPTS_IMAGE) bash -c 'cd /home/i && ./scripts/e2e-deposit-split/target/release/e2e-deposit-split' 2>&1 | tee /tmp/e2e-split.log
+	@$(mesh_run) 'cd /home/i && ./scripts/e2e-deposit-split/target/release/e2e-deposit-split' 2>&1 | tee /tmp/e2e-split.log
 	@echo "==> [stack] extracting 3 notes"
 	@python3 -c "import re,json; \
 	  data=open('/tmp/e2e-split.log').read(); \
@@ -286,24 +270,22 @@ e2e-split:
 	  notes=json.load(open('/tmp/notes.json')); \
 	  [json.dump(n, open(f'/tmp/note{i}.json','w'), indent=2) for i,n in enumerate(notes)]"
 	@for i in 0 1 2; do \
-	  docker cp /tmp/note$$i.json zkpool-mesh-backend:/tmp/note$$i.json; \
+	  docker cp /tmp/note$$i.json zkpool-mesh:/tmp/note$$i.json; \
 	done
 	@echo "==> [stack] e2e withdraw x3"
 	@for i in 0 1 2; do \
-	  docker exec zkpool-mesh-backend bash -lc "cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note$$i.json $(E2E_RECIPIENT)" 2>&1 | tee /tmp/e2e-withdraw-$$i.log; \
+	  docker exec zkpool-mesh bash -lc "cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note$$i.json $(E2E_RECIPIENT)" 2>&1 | tee /tmp/e2e-withdraw-$$i.log; \
 	done
 
 # ============================================================
 # Full cycle
 # ============================================================
-
 redeploy: wipe boot chain infra stack e2e
 	@echo "==> redeploy complete"
 
 # ============================================================
 # Diagnostics
 # ============================================================
-
 status:
 	@echo "==> containers"
 	@$(COMPOSE) ps
@@ -331,7 +313,7 @@ sync-ids:
 
 verify: sync-ids
 	@echo "==> on-chain pool"
-	@docker exec zkpool-mesh-backend bash -lc 'solana account $$(grep -E "^POOL_ADDRESS=" /home/i/.env | cut -d= -f2) --url $(LOCAL_RPC) 2>&1 | head -8' || true
+	@docker exec zkpool-mesh bash -lc 'solana account $$(grep -E "^POOL_ADDRESS=" /home/i/.env | cut -d= -f2) --url $(LOCAL_RPC) 2>&1 | head -8' || true
 	@echo "==> postgres commitments"
 	@docker exec $(PG) psql -U zkpool -d zkpool -c "SELECT leaf_index, encode(commitment,'hex') FROM commitments ORDER BY leaf_index;" 2>/dev/null || echo "   (db not ready)"
 	@echo "==> postgres roots (last 3)"
@@ -353,7 +335,6 @@ verify: sync-ids
 	  curl -s -m 5 "http://localhost:4001/api/proof?leaf_index=$$LAST" | head -c 200; echo
 
 logs:
-	@echo "==> merkle";    docker logs --tail 20 zkpool-mesh-merkle   2>/dev/null || true
-	@echo "==> prover";    docker logs --tail 20 zkpool-mesh-prover   2>/dev/null || true
-	@echo "==> backend";   docker logs --tail 20 zkpool-mesh-backend  2>/dev/null || true
-	@echo "==> frontend";  docker logs --tail 20 zkpool-mesh-frontend 2>/dev/null || true
+	@echo "==> merkle";  docker logs --tail 20 zkpool-merkle 2>/dev/null || true
+	@echo "==> backend"; docker exec zkpool-mesh bash -lc 'tail -20 /tmp/backend.log 2>/dev/null' || true
+	@echo "==> prover";  docker exec zkpool-mesh bash -lc 'tail -20 /tmp/prover.log 2>/dev/null' || true

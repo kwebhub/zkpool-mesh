@@ -1,7 +1,0 @@
-FROM zkpool-base:latest
-
-USER i
-SHELL ["/bin/bash", "-c"]
-WORKDIR /home/i
-
-CMD ["/bin/bash"]

@@ -4,14 +4,14 @@ services:
       context: ..
       dockerfile: infra/docker/Dockerfile.test
     image: zkpool-test:latest
-    container_name: zkpool-mesh-test-validator
+    container_name: zkpool-validator
     security_opt:
       - seccomp:unconfined
     ports:
       - "8899:8899"
       - "9900:9900"
     volumes:
-      - zkpool-mesh-test-validator-ledger:/home/i/.ledger
+      - zkpool-validator-ledger:/home/i/.ledger
     healthcheck:
       test:
         [
@@ -26,7 +26,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: zkpool-mesh-postgres
+    container_name: zkpool-postgres
     environment:
       POSTGRES_USER: zkpool
       POSTGRES_PASSWORD: zkpool_dev_password
@@ -34,7 +34,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - zkpool-mesh-postgres-data:/var/lib/postgresql/data
+      - zkpool-postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U zkpool -d zkpool"]
       interval: 5s
@@ -44,11 +44,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: zkpool-mesh-redis
+    container_name: zkpool-redis
     ports:
       - "6379:6379"
     volumes:
-      - zkpool-mesh-redis-data:/data
+      - zkpool-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -57,12 +57,41 @@ services:
     command: redis-server --appendonly yes
     restart: unless-stopped
 
+  mesh:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.base
+    image: zkpool-base:latest
+    container_name: zkpool-mesh
+    stdin_open: true
+    tty: true
+    working_dir: /home/i
+    volumes:
+      - ../onchain:/home/i/onchain
+      - ../circuits:/home/i/circuits
+      - ../services:/home/i/services
+      - ../scripts:/home/i/scripts
+      - ../tests:/home/i/tests
+      - ../solana:/home/i/.config/solana
+      - ../.env:/home/i/.env
+    ports:
+      - "4001:4001"
+      - "4002:4002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      solana-test-validator:
+        condition: service_healthy
+    restart: unless-stopped
+
   merkle:
     build:
       context: ..
-      dockerfile: infra/docker/Dockerfile.merkle
-    image: zkpool-merkle:latest
-    container_name: zkpool-mesh-merkle
+      dockerfile: infra/docker/Dockerfile.node-base
+    image: zkpool-node-base:latest
+    container_name: zkpool-merkle
     working_dir: /home/i/services/merkle
     volumes:
       - ../services/merkle:/home/i/services/merkle
@@ -74,78 +103,38 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  prover:
-    build:
-      context: ..
-      dockerfile: infra/docker/Dockerfile.backend
-    image: zkpool-backend:latest
-    container_name: zkpool-mesh-prover
-    working_dir: /home/i/services/prover
-    volumes:
-      - ../services/prover:/home/i/services/prover
-      - ../circuits:/home/i/circuits:ro
-      - ../.env:/home/i/.env
-    ports:
-      - "4002:4002"
-    depends_on:
-      solana-test-validator:
-        condition: service_healthy
-    restart: unless-stopped
-
-  backend:
-    build:
-      context: ..
-      dockerfile: infra/docker/Dockerfile.backend
-    image: zkpool-backend:latest
-    container_name: zkpool-mesh-backend
-    working_dir: /home/i/services/backend
-    volumes:
-      - ../services/backend:/home/i/services/backend
-      - ../.env:/home/i/.env
-    ports:
-      - "4001:4001"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      solana-test-validator:
-        condition: service_healthy
-    restart: unless-stopped
-
   frontend:
     build:
       context: ..
       dockerfile: infra/docker/Dockerfile.frontend
     image: zkpool-frontend:latest
-    container_name: zkpool-mesh-frontend
+    container_name: zkpool-web
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      - mesh
     restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.55.0
-    container_name: zkpool-mesh-prometheus
+    container_name: zkpool-prometheus
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - zkpool-mesh-prometheus-data:/prometheus
+      - zkpool-prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=7d"
     depends_on:
-      - backend
-      - prover
+      - mesh
       - merkle
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana:11.3.0
-    container_name: zkpool-mesh-grafana
+    container_name: zkpool-grafana
     ports:
       - "3000:3000"
     environment:
@@ -153,15 +142,15 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
-      - zkpool-mesh-grafana-data:/var/lib/grafana
+      - zkpool-grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
     restart: unless-stopped
 
 volumes:
-  zkpool-mesh-postgres-data:
-  zkpool-mesh-redis-data:
-  zkpool-mesh-prometheus-data:
-  zkpool-mesh-grafana-data:
-  zkpool-mesh-test-validator-ledger:
+  zkpool-postgres-data:
+  zkpool-redis-data:
+  zkpool-prometheus-data:
+  zkpool-grafana-data:
+  zkpool-validator-ledger:

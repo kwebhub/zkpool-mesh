@@ -23,11 +23,13 @@ withdrawal.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ FRONTEND (Vue 3 + Vite + Pinia + TS + Pug + SCSS) — 5173         │
+│ FRONTEND (Vue 3 + Vite + Pinia + TS + Pug + SCSS) — :8080        │
+│   zkpool-web (nginx:alpine)                                      │
 └──────────────────────────────────────────────────────────────────┘
               ↓ HTTP                    ↑ HTTP
 ┌──────────────────────────────────────────────────────────────────┐
-│ BACKEND (Rust + axum) — 4001                                     │
+│ BACKEND (Rust + axum) — :4001                                    │
+│   zkpool-mesh                                                    │
 │   /api/health  /api/commitments  /api/root  /api/proof           │
 │   /api/withdraw  /metrics                                        │
 └──────────────────────────────────────────────────────────────────┘
@@ -35,20 +37,24 @@ withdrawal.
 ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐
 │ POSTGRES 16  │   │ REDIS 7      │   │ MERKLE (Node.js)     │
 │  :5432       │   │  :6379       │   │  :4003               │
-└──────────────┘   └──────────────┘   └──────────────────────┘
+│  zkpool-     │   │  zkpool-     │   │  zkpool-merkle       │
+│  postgres    │   │  redis       │   └──────────────────────┘
+└──────────────┘   └──────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│ PROVER (Rust + Sunspot) — 4002                                   │
+│ PROVER (Rust + Sunspot) — :4002                                  │
+│   zkpool-mesh                                                    │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
 │ MONITORING                                                       │
-│ • Prometheus :9090                                               │
-│ • Grafana    :3000  (admin/admin)                                │
+│ • Prometheus :9090   zkpool-prometheus                           │
+│ • Grafana    :3000   zkpool-grafana (admin/admin)                │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│ SOLANA (devnet)                                                  │
+│ SOLANA (local validator)                                         │
+│ • zkpool-validator — :8899 / :9900 (solana-test-validator)       │
 │ • Verifier program — checks Groth16 proofs                       │
 │ • zk_pool program  — deposit / withdraw                          │
 │ • Pool PDA + Vault PDA                                           │
@@ -62,17 +68,72 @@ withdrawal.
 4. LiteSVM E2E test before devnet.
 5. Checkpoints with SHA-256.
 
+## Build architecture (boot → cache → images)
+
+**Four images, four containers:**
+
+| Image | Dockerfile | Container | Services |
+|---|---|---|---|
+| `zkpool-base` | `Dockerfile.base` | `zkpool-mesh` | backend, anchor, circuits, scripts |
+| `zkpool-node-base` | `Dockerfile.node-base` | `zkpool-merkle` | merkle |
+| `zkpool-frontend` | `Dockerfile.frontend` | `zkpool-web` | frontend |
+| `zkpool-test` | `Dockerfile.test` | `zkpool-validator` | solana-test-validator |
+
+**Cache flow:**
+
+1. boot_pnpm:
+- cache/pnpm/
+- Dockerfile.node-base
+- image: zkpool-node-base
+- container: zkpool-merkle
+
+2. boot_nginx:
+- cache/images/nginx_alpine.tar
+- Dockerfile.frontend (use zkpool-node-base)
+- image: zkpool-frontend
+- container: zkpool-web
+
+3. boot_solana_dev:
+- cache/solana-dev/node/
+- cache/solana-dev/bin/
+- cache/cargo-bin/
+- cache/anchor/anchor
+  3.1. boot_go - cache/go/
+  3.2. boot_sunspot - cache/sunspot/
+  3.3. boot_nargo - cache/nargo/
+- Dockerfile.test
+- image: zkpool-test
+- container: zkpool-validator
+- Dockerfile.base
+- image: zkpool-base (for backend, anchor, circuits, scripts)
+- container: zkpool-mesh
+
+4. boot_images - cache/images/*.tar - infra (compose)
+
+| Образ | Dockerfile | Контейнер | Службы |
+| --- | --- | --- | --- |
+| zkpool-base | Dockerfile.base | zkpool-mesh | backend, anchor, circuits, scripts |
+| zkpool-node-base | Dockerfile.node-base | zkpool-merkle | merkle |
+| zkpool-frontend | Dockerfile.frontend | zkpool-web | frontend |
+| zkpool-test | Dockerfile.test | zkpool-validator | solana-test-validator |
+
+**`scripts/boot.sh`** — one-time cache warm-up:
+- Reads versions from `.env`: `ANCHOR_VERSION`, `NODE_VERSION`, `PNPM_VERSION`, `GO_VERSION`, `CARGO_DENY_VERSION` (empty → latest).
+- Functions: `boot_go`, `boot_solana_dev`, `boot_sunspot`, `boot_nargo`, `boot_pnpm`, `boot_images`, `boot_wallet`.
+- Builder: `debian:13` + `python3`, `jq`, `libclang-dev`, `protobuf-compiler`, user `i` (UID 1000), `HOME=/home/i`.
+- `boot_wallet`: creates wallet, log to `.secrets/keygen.log` (no stdout leak), balance printed, airdrop **not** performed.
+- Network is used only inside `boot.sh`. Base images and per-part images build offline from `cache/`.
+
 ## Quick start
 
 > **Note:** `VERIFIER_PROGRAM_ID` in `.env` must match `onchain/programs/zk_pool/src/constants.rs`.
-> Update it manually after every verifier redeploy.
+> `make chain` updates both automatically on every run.
 
 ### Prerequisites
 
 - Docker
 - Git
-- ~5 GB free disk space for the container image
-- A funded Solana devnet wallet at `solana/id.json`
+- ~10 GB free disk space for `cache/` and Docker images
 
 ### First-time setup
 
@@ -81,50 +142,52 @@ withdrawal.
 git clone git@github.com:kwebhub/zkpool-mesh.git
 cd zkpool-mesh
 
-# 2. Environment
-cp .env.example .env
-# Edit .env: set PROGRAM_ID, POOL_ADDRESS, VERIFIER_PROGRAM_ID
+# 2. Warm cache + create wallet
+make boot
 
-# 3. Wallet (devnet)
-mkdir -p solana
-docker compose -f infra/docker-compose.yml up -d
-docker exec -it zkpool-mesh-app bash -l -c "solana-keygen new -o /home/ubuntu/.config/solana/id.json --no-bip39-passphrase --force"
-docker exec -it zkpool-mesh-app bash -l -c "solana-keygen pubkey /home/ubuntu/.config/solana/id.json"
-# Fund the printed pubkey via https://faucet.solana.com (devnet, 2 SOL)
-docker exec -it zkpool-mesh-app bash -l -c "solana config set --url devnet && solana balance"
-docker compose -f infra/docker-compose.yml down
+# 3. Build images
+make build-images
 
-# 4. Init everything
-make init
+# 4. Start infra (postgres, redis, validator)
+make up
+
+# 5. Apply DB migrations
+make migrations
+
+# 6. Deploy on-chain: verifier + zk_pool + pool-init
+make chain
+
+# 7. Build + start services (backend, prover, merkle)
+make stack
+
+# 8. E2E: deposit → withdraw
+make e2e
 ```
-
-`make init` builds the image, applies migrations, generates ACIR, installs JS dependencies, builds the services, and starts them.
 
 ### Daily use
 
 ```bash
 make up       # start infra + services
-make status   # containers + processes + HTTP health + sync
-make logs     # tail service logs
+make status   # containers + health + Postgres/Redis counts
+make logs     # tail merkle/prover/backend/frontend logs
 make down     # stop all
-make wipe     # remove everything (containers, volumes, images, caches)
+make wipe     # remove containers, volumes, images (cache/ preserved)
 ```
 
-### E2E on devnet
-
-After `make init` and `make up`:
+### Full cycle
 
 ```bash
-make e2e
+make redeploy   # wipe → boot → chain → infra → stack → e2e
 ```
 
-This runs `e2e-deposit`, extracts the note, waits for the indexer, and runs `e2e-withdraw`. Logs are saved to `/tmp/e2e-deposit.log` and `/tmp/e2e-withdraw.log`.
-
-### Rebuild
+### E2E variants
 
 ```bash
-make build    # backend + prover + web
+make e2e         # deposit (1 note) → withdraw
+make e2e-split   # split deposit (3 notes) → withdraw each
 ```
+
+Logs are saved to `/tmp/e2e-deposit.log`, `/tmp/e2e-withdraw.log`, `/tmp/e2e-split.log`.
 
 ## Repository layout
 
@@ -138,10 +201,39 @@ zkpool-mesh/
 │   ├── merkle/       Node.js + Fastify (Poseidon2 via noir_js)
 │   └── prover/       Rust + axum (nargo + sunspot pipeline)
 ├── web/              Vue 3 + TS + Pug + SCSS
-├── scripts/          Rust CLIs (validate-spec, sync-circuits, …)
-├── infra/            Docker Compose, Dockerfile, Prometheus, Grafana
+├── scripts/          boot.sh, Rust CLIs (validate-spec, sync-circuits, e2e-*, pool-init)
+├── infra/            compose.yml, Dockerfiles, Prometheus, Grafana
+├── cache/            gitignored, filled by boot.sh (not removed by make wipe)
+├── solana/           gitignored, wallet + CLI config
+├── .secrets/         gitignored, deploy logs + keygen.log
+├── .checkpoints/     gitignored, SHA-256 manifests per stage
 └── .github/          Workflows, issue templates, dependabot
 ```
+
+## Make targets
+
+| Target | Description |
+|---|---|
+| `boot` | Warm `cache/` + create wallet |
+| `build-images` | Build base, node-base, test, frontend images |
+| `up` / `down` | Start / stop compose |
+| `migrations` | Apply SQL migrations |
+| `infra` | `build-images` + `up` + `migrations` |
+| `chain` | Deploy verifier + zk_pool + pool-init |
+| `chain-close` | Close old programs from `cache/old-programs.txt` |
+| `sync-ids` | Verify `PROGRAM_ID` / `VERIFIER_PROGRAM_ID` match `.env` |
+| `validate-spec` | Validate `circuits/withdrawal/spec.json` |
+| `sync` / `sync-check` | Copy ACIR to merkle/web / check only |
+| `check` | Verify `.ccs`/`.pk` exist (from `make chain`) |
+| `deps` | `pnpm install` in merkle and frontend |
+| `mesh` | `cargo build` backend/prover + `pnpm build` web |
+| `e2e-build` | Build e2e binaries |
+| `services` | Restart merkle/backend/prover + health checks |
+| `stack` | `validate-spec` + `sync` + `check` + `deps` + `mesh` + `e2e-build` + `services` |
+| `e2e` / `e2e-split` | Deposit → withdraw (1 note / 3 notes) |
+| `redeploy` | Full cycle |
+| `wipe` | Remove containers/volumes/images (`cache/` preserved) |
+| `status` / `logs` / `verify` | Diagnostics |
 
 ## Documentation
 
