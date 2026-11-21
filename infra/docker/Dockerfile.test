@@ -11,7 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 -s /bin/bash i
+RUN useradd -m -u 1000 -s /bin/bash i \
+  && mkdir -p /home/i/.ledger \
+  && chown -R i:i /home/i
 
 USER i
 SHELL ["/bin/bash", "-c"]
