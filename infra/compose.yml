@@ -5,6 +5,7 @@ services:
       dockerfile: infra/docker/Dockerfile.test
     image: zkpool-test:latest
     container_name: zkpool-validator
+    user: "1000:1000"
     security_opt:
       - seccomp:unconfined
     ports:
