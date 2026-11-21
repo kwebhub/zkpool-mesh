@@ -89,7 +89,14 @@ build-images: env-check
 	@echo "==> [infra] building $(FRONTEND_IMAGE)"
 	@docker build -f infra/docker/Dockerfile.frontend -t $(FRONTEND_IMAGE) .
 
-up:
+load-images:
+	@echo "==> [infra] loading cached images from cache/images/"
+	@for f in cache/images/*.tar; do \
+	  [ -f "$$f" ] || continue; \
+	  docker load -i "$$f" >/dev/null; \
+	done
+
+up: load-images
 	@echo "==> [infra] docker compose up"
 	@$(COMPOSE) up -d
 	@sleep 3
