@@ -194,6 +194,15 @@ boot_solana_dev() {
       fi
       cargo install cargo-audit --locked
 
+      # platform-tools for cargo-build-sbf (offline deploy of verifier)
+      export SOLANA_PLATFORM_TOOLS_VERSION=v1.56
+      cargo-build-sbf --tools-version "$SOLANA_PLATFORM_TOOLS_VERSION" --help >/dev/null 2>&1 || true
+      pt_src="$HOME/.cache/solana"
+      if [ -d "$pt_src" ]; then
+        mkdir -p /cache/solana-dev/platform-tools
+        cp -a "$pt_src/." /cache/solana-dev/platform-tools/
+      fi
+
       # Copy to cache
       mkdir -p /cache/solana-dev/bin /cache/solana-dev/node/bin /cache/cargo-bin
       cp -a "$HOME/.local/share/solana/install/active_release/bin/." /cache/solana-dev/bin/
