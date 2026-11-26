@@ -17,23 +17,23 @@ check:
 	@echo "   ok"
 
 deps:
-	@echo "==> [stack] pnpm install (merkle, frontend)"
-	@docker exec zkpool-merkle bash -lc 'cd /home/i/services/merkle && pnpm install'
-	@docker exec zkpool-web bash -lc 'cd /home/i/web && pnpm install'
+	@echo "==> [stack] pnpm install (merkle)"
+	@docker exec zkpool-merkle bash -c 'cd /home/i/services/merkle && pnpm install --frozen-lockfile'
 
 mesh:
 	@echo "==> [stack] build backend"
-	@docker exec zkpool-mesh bash -lc 'cd /home/i/services/backend && cargo build --release'
+	@docker exec zkpool-mesh bash -c 'cd /home/i/services/backend && cargo build --release'
 	@echo "==> [stack] build prover"
-	@docker exec zkpool-mesh bash -lc 'cd /home/i/services/prover && cargo build --release'
+	@docker exec zkpool-mesh bash -c 'cd /home/i/services/prover && cargo build --release'
 	@echo "==> [stack] build web"
-	@docker exec zkpool-web bash -lc 'cd /home/i/web && pnpm install --frozen-lockfile && pnpm build'
+	@$(COMPOSE) build frontend && $(COMPOSE) up -d frontend
 
 services:
 	@echo "==> [stack] restart merkle/backend/prover"
-	@docker exec -d zkpool-merkle bash -lc 'cd /home/i/services/merkle && node src/server.js > /tmp/merkle.log 2>&1' || true
-	@docker exec -d zkpool-mesh bash -lc 'cd /home/i/services/prover && ./target/release/zkpool-prover > /tmp/prover.log 2>&1' || true
-	@docker exec -d zkpool-mesh bash -lc 'cd /home/i/services/backend && ./target/release/zkpool-backend > /tmp/backend.log 2>&1' || true
+	@docker restart zkpool-merkle zkpool-mesh >/dev/null
+	@docker exec -d zkpool-merkle bash -c 'set -a; [ -f /home/i/.env ] && . /home/i/.env; set +a; cd /home/i/services/merkle && node src/server.js > /tmp/merkle.log 2>&1' || true
+	@docker exec -d zkpool-mesh bash -c 'set -a; [ -f /home/i/.env ] && . /home/i/.env; set +a; cd /home/i/services/prover && ./target/release/zkpool-prover > /tmp/prover.log 2>&1' || true
+	@docker exec -d zkpool-mesh bash -c 'set -a; [ -f /home/i/.env ] && . /home/i/.env; set +a; cd /home/i/services/backend && ./target/release/zkpool-backend > /tmp/backend.log 2>&1' || true
 	@sleep 5
 	@for entry in "4001 /api/health" "4002 /health" "4003 /health"; do \
 	  p=$${entry%% *}; path=$${entry##* }; \
@@ -61,7 +61,7 @@ e2e:
 	  curl -s http://localhost:4001/api/commitments | grep -q "$$COMMIT" || { echo "   FAIL commitment not indexed"; exit 1; }
 	@docker cp /tmp/note.json zkpool-mesh:/tmp/note.json
 	@echo "==> [stack] e2e withdraw"
-	@docker exec zkpool-mesh bash -lc 'cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note.json $(E2E_RECIPIENT)' 2>&1 | tee /tmp/e2e-withdraw.log
+	@docker exec zkpool-mesh bash -c 'cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note.json $(E2E_RECIPIENT)' 2>&1 | tee /tmp/e2e-withdraw.log
 
 e2e-build:
 	@echo "==> [stack] build e2e binaries"
@@ -95,5 +95,5 @@ e2e-split:
 	done
 	@echo "==> [stack] e2e withdraw x3"
 	@for i in 0 1 2; do \
-	  docker exec zkpool-mesh bash -lc "cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note$$i.json $(E2E_RECIPIENT)" 2>&1 | tee /tmp/e2e-withdraw-$$i.log; \
+	  docker exec zkpool-mesh bash -c "cd /home/i && ./scripts/e2e-withdraw/target/release/e2e-withdraw /tmp/note$$i.json $(E2E_RECIPIENT)" 2>&1 | tee /tmp/e2e-withdraw-$$i.log; \
 	done

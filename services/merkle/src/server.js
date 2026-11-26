@@ -5,7 +5,7 @@
 
 import { buildApp } from "./app.js";
 
-const PORT = Number(process.env.PORT ?? 4003);
+const PORT = Number(process.env.MERKLE_PORT ?? 4003);
 const HOST = process.env.HOST ?? "0.0.0.0";
 
 const app = await buildApp();

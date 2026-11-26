@@ -95,10 +95,13 @@ services:
       dockerfile: infra/docker/Dockerfile.node-base
     image: zkpool-node-base:latest
     container_name: zkpool-merkle
+    stdin_open: true
+    tty: true
     working_dir: /home/i/services/merkle
     volumes:
       - ../services/merkle:/home/i/services/merkle
       - ../circuits:/home/i/circuits:ro
+      - ../.env:/home/i/.env
     ports:
       - "4003:4003"
     depends_on:
