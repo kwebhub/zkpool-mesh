@@ -1,4 +1,5 @@
 airdrop:
+	@docker network inspect $(COMPOSE_NETWORK) >/dev/null 2>&1 || { echo "ERROR: $(COMPOSE_NETWORK) not running — run make up first"; exit 1; }
 	@echo "==> [chain 0/5] airdrop to wallet (only if balance < 2 SOL)"
 	@$(mesh_run) 'solana config set --url $(LOCAL_RPC) >/dev/null; \
 	  BAL=$$(solana balance --url $(LOCAL_RPC) 2>/dev/null | awk "{print \$$1}"); \
@@ -19,7 +20,7 @@ chain: airdrop
 	  sunspot compile target/withdrawal.json && \
 	  sunspot setup target/withdrawal.ccs && \
 	  cd target && rm -f withdrawal-keypair.json && sunspot deploy withdrawal.vk && \
-	  solana program deploy withdrawal.so --program-id withdrawal-keypair.json --max-sign-attempts 1000 --commitment confirmed --url $(LOCAL_RPC) > /home/i/.secrets/deploy-verifier.log 2>&1; \
+	  solana program deploy withdrawal.so --program-id withdrawal-keypair.json --use-rpc --max-sign-attempts 1000 --commitment confirmed --url $(LOCAL_RPC) > /home/i/.secrets/deploy-verifier.log 2>&1; \
 	  grep -A2 "12-word seed phrase" /home/i/.secrets/deploy-verifier.log | tail -1 | sed "s/^/verifier_buffer_seed: /" >> /home/i/.secrets/keys.md; \
 	  grep -E "Program Id:|Signature:" /home/i/.secrets/deploy-verifier.log'
 	@echo "==> [chain 3/5] update constants.rs with new VERIFIER_PROGRAM_ID"
@@ -31,16 +32,18 @@ chain: airdrop
 	  sed "s|^VERIFIER_PROGRAM_ID=.*|VERIFIER_PROGRAM_ID=$$NEW_VERIFIER|" /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new; \
 	  grep -E "^VERIFIER_PROGRAM_ID=" /home/i/.env'
 	@echo "==> [chain 4/5] zk_pool: sync id → build → deploy"
-	@$(mesh_run) 'set -e; cd /home/i/onchain && rm -f target/deploy/zk_pool-keypair.json && \
-	  anchor build --no-idl -- --arch v0 2>&1 | tail -3; \
+	@$(mesh_run) 'set -eo pipefail; cd /home/i/onchain && rm -f target/deploy/zk_pool-keypair.json && \
+	  PT_VER=$$(grep -E "^SOLANA_PLATFORM_TOOLS_VERSION=" /home/i/.env | cut -d= -f2); \
+	  PT_VER=$${PT_VER:-$$(ls -1 /home/i/.cache/solana | head -1)}; \
+	  anchor build --no-idl --tools-version $$PT_VER 2>&1 | tail -3; \
 	  NEW_ID=$$(solana-keygen pubkey target/deploy/zk_pool-keypair.json); \
 	  echo "   new zk_pool PROGRAM_ID=$$NEW_ID"; \
 	  sed "s|declare_id!(\"[^\"]*\")|declare_id!(\"$$NEW_ID\")|" /home/i/onchain/programs/zk_pool/src/lib.rs > /tmp/lib.rs.new && cat /tmp/lib.rs.new > /home/i/onchain/programs/zk_pool/src/lib.rs && rm -f /tmp/lib.rs.new; \
 	  sed "s|^zk_pool = .*|zk_pool = \"$$NEW_ID\"|" /home/i/onchain/Anchor.toml > /tmp/Anchor.toml.new && cat /tmp/Anchor.toml.new > /home/i/onchain/Anchor.toml && rm -f /tmp/Anchor.toml.new; \
 	  sed "s|^PROGRAM_ID=.*|PROGRAM_ID=$$NEW_ID|" /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new; \
-	  anchor build --no-idl -- --arch v0 2>&1 | tail -3; \
+	  anchor build --no-idl --tools-version $$PT_VER 2>&1 | tail -3; \
 	  anchor idl build -o target/idl/zk_pool.json && \
-	  solana program deploy target/deploy/zk_pool.so --program-id target/deploy/zk_pool-keypair.json --max-sign-attempts 1000 --url $(LOCAL_RPC) > /home/i/.secrets/deploy-zkpool.log 2>&1; \
+	  solana program deploy target/deploy/zk_pool.so --program-id target/deploy/zk_pool-keypair.json --use-rpc --max-sign-attempts 1000 --url $(LOCAL_RPC) > /home/i/.secrets/deploy-zkpool.log 2>&1; \
 	  grep -A2 "12-word seed phrase" /home/i/.secrets/deploy-zkpool.log | tail -1 | sed "s/^/zkpool_buffer_seed: /" >> /home/i/.secrets/keys.md; \
 	  grep -E "Program Id:|Signature:" /home/i/.secrets/deploy-zkpool.log'
 	@$(mesh_run) 'set -e; NEW_PROGRAM=$$(solana-keygen pubkey /home/i/onchain/target/deploy/zk_pool-keypair.json); \
@@ -48,7 +51,7 @@ chain: airdrop
 	  sed "s|^PROGRAM_ID=.*|PROGRAM_ID=$$NEW_PROGRAM|; s|^POOL_ADDRESS=.*|POOL_ADDRESS=|" /home/i/.env > /tmp/.env.new && cat /tmp/.env.new > /home/i/.env && rm -f /tmp/.env.new; \
 	  grep -E "^(PROGRAM_ID|POOL_ADDRESS)=" /home/i/.env'
 	@echo "==> [chain 5/5] pool-init"
-	@$(mesh_run) 'set -e; cd /home/i && cargo build --release --manifest-path scripts/pool-init/Cargo.toml 2>&1 | tail -3 && \
+	@$(mesh_run) 'set -eo pipefail; cd /home/i && cargo build --release --manifest-path scripts/pool-init/Cargo.toml 2>&1 | tail -3 && \
 	  ./scripts/pool-init/target/release/pool-init --rpc $(LOCAL_RPC) --keypair /home/i/.config/solana/id.json 2>&1 | tee /home/i/cache/pool-init.log'
 	@NEW_POOL=$$(grep -E "^Pool PDA:" cache/pool-init.log | awk '{print $$3}'); \
 	  [ -n "$$NEW_POOL" ] || { echo "ERROR: Pool PDA not found"; exit 1; }; \

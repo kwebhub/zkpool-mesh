@@ -21,6 +21,7 @@ CHAIN_VOLUMES := \
   -v $(CURDIR)/onchain:/home/i/onchain \
   -v $(CURDIR)/circuits:/home/i/circuits \
   -v $(CURDIR)/scripts:/home/i/scripts \
+  -v $(CURDIR)/cache:/home/i/cache \
   -v $(CURDIR)/.secrets:/home/i/.secrets
 
 mesh_run := docker run --rm --network $(COMPOSE_NETWORK) -e GNARK_VERIFIER_BIN=/home/i/sunspot/gnark-solana/crates/verifier-bin $(CHAIN_VOLUMES) -w /home/i $(BASE_IMAGE) bash -c
@@ -75,5 +76,5 @@ include infra/mk/chain.mk
 include infra/mk/stack.mk
 include infra/mk/diag.mk
 
-redeploy: wipe boot chain infra stack e2e
+redeploy: wipe boot infra chain stack e2e
 	@echo "==> redeploy complete"

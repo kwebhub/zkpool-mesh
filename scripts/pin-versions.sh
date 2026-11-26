@@ -22,6 +22,7 @@ NARGO_VERSION=$(get_base 'nargo --version' | sed -n 's/^nargo version = \(.*\)$/
 RUSTC_VERSION=$(get_base 'rustc --version' | awk '{print $2}')
 GO_VERSION=$(get_base '/opt/go/bin/go version' | awk '{print $3}' | sed 's/^go//')
 CARGO_DENY_VERSION=$(get_base 'cargo-deny --version' | awk '{print $2}')
+SOLANA_PLATFORM_TOOLS_VERSION=$(get_base 'ls -1 /home/i/.cache/solana | head -1')
 NODE_VERSION=$(get_node 'node --version' | sed 's/^v//')
 PNPM_VERSION=$(get_node 'pnpm --version')
 
@@ -32,6 +33,7 @@ declare -A V=(
   [RUSTC_VERSION]="$RUSTC_VERSION"
   [GO_VERSION]="$GO_VERSION"
   [CARGO_DENY_VERSION]="$CARGO_DENY_VERSION"
+  [SOLANA_PLATFORM_TOOLS_VERSION]="$SOLANA_PLATFORM_TOOLS_VERSION"
   [NODE_VERSION]="$NODE_VERSION"
   [PNPM_VERSION]="$PNPM_VERSION"
 )
@@ -49,13 +51,12 @@ pin_file() {
       printf '%s=%s\n' "$k" "${V[$k]}" >>"$tmp"
     fi
   done
-  # keep sorted version block: optional, leave as-is otherwise
   mv "$tmp" "$f"
 }
 
 pin_file .env
 
 echo "==> [pin-versions] pinned:"
-for k in ANCHOR_VERSION SOLANA_VERSION NARGO_VERSION RUSTC_VERSION GO_VERSION CARGO_DENY_VERSION NODE_VERSION PNPM_VERSION; do
+for k in ANCHOR_VERSION SOLANA_VERSION NARGO_VERSION RUSTC_VERSION GO_VERSION CARGO_DENY_VERSION SOLANA_PLATFORM_TOOLS_VERSION NODE_VERSION PNPM_VERSION; do
   echo "    $k=${V[$k]}"
 done

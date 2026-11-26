@@ -159,7 +159,7 @@ async fn account_exists(client: &reqwest::Client, rpc: &str, pubkey: &Pubkey) ->
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getAccountInfo",
-        "params": [pubkey.to_string(), {"encoding": "base64"}],
+        "params": [pubkey.to_string(), {"encoding": "base64", "commitment": "confirmed"}],
     });
     let resp: Value = client.post(rpc).json(&body).send().await?.json().await?;
     let value = resp.pointer("/result/value");
@@ -181,6 +181,24 @@ async fn get_latest_blockhash(client: &reqwest::Client, rpc: &str) -> Result<Has
     Ok(Hash::from_str(bh_str)?)
 }
 
+// async fn send_transaction(client: &reqwest::Client, rpc: &str, tx_bytes: &[u8]) -> Result<String> {
+//     use base64::Engine;
+//     let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
+//     let body = json!({
+//         "jsonrpc": "2.0",
+//         "id": 1,
+//         "method": "sendTransaction",
+//         "params": [b64, {"encoding": "base64", "skipPreflight": false}],
+//     });
+//     let resp: Value = client.post(rpc).json(&body).send().await?.json().await?;
+//     if let Some(err) = resp.get("error") {
+//         bail!("sendTransaction RPC error: {}", err);
+//     }
+//     resp.pointer("/result")
+//         .and_then(|v| v.as_str())
+//         .map(|s| s.to_string())
+//         .context("sendTransaction response missing signature")
+// }
 async fn send_transaction(client: &reqwest::Client, rpc: &str, tx_bytes: &[u8]) -> Result<String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
@@ -188,7 +206,7 @@ async fn send_transaction(client: &reqwest::Client, rpc: &str, tx_bytes: &[u8]) 
         "jsonrpc": "2.0",
         "id": 1,
         "method": "sendTransaction",
-        "params": [b64, {"encoding": "base64", "skipPreflight": false}],
+        "params": [b64, {"encoding": "base64", "skipPreflight": false, "preflightCommitment": "confirmed"}],
     });
     let resp: Value = client.post(rpc).json(&body).send().await?.json().await?;
     if let Some(err) = resp.get("error") {
@@ -233,7 +251,7 @@ async fn print_pool_state(client: &reqwest::Client, rpc: &str, pubkey: &Pubkey) 
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getAccountInfo",
-        "params": [pubkey.to_string(), {"encoding": "base64"}],
+        "params": [pubkey.to_string(), {"encoding": "base64", "commitment": "confirmed"}],
     });
     let resp: Value = client.post(rpc).json(&body).send().await?.json().await?;
     let data_b64 = resp

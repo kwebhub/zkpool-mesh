@@ -95,7 +95,7 @@ pub const PROOF_LEN: usize = 388;
 /// The `withdraw` instruction calls this program via CPI to verify the
 /// Groth16 proof. If the circuit is ever changed, the verifier program
 /// must be rebuilt and this constant must be updated.
-pub const VERIFIER_PROGRAM_ID: Pubkey = pubkey!("Fw8tFwwb7Qu42etnJdcRcNwAhuLW99JnjC9uLGfbeBsJ");
+pub const VERIFIER_PROGRAM_ID: Pubkey = pubkey!("53roUfRKsTqoivSvZgtpCSf5S1tsujVqdxZqJeFrg7H3");
 
 // ============================================================
 // Economics
