@@ -5,7 +5,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("FjVUEVj8Sgi2jHZBkvj4JPEiT3JcyEeuv9mj3fwrJeJ9");
+declare_id!("D7TLUQ33qBv4CYzXjBMFsXPvyspZgQ3bSXnuY54bqcoJ");
 
 pub mod constants;
 pub mod encoding;

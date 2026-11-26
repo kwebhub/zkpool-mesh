@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-zk_pool = "FjVUEVj8Sgi2jHZBkvj4JPEiT3JcyEeuv9mj3fwrJeJ9"
+zk_pool = "D7TLUQ33qBv4CYzXjBMFsXPvyspZgQ3bSXnuY54bqcoJ"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
