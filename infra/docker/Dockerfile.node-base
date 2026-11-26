@@ -19,10 +19,12 @@ WORKDIR /home/i
 
 ENV HOME=/home/i \
   PNPM_HOME=/home/i/.local/share/pnpm \
+  PNPM_STORE_PATH=/home/i/.local/share/pnpm/store \
   PATH=/home/i/.local/share/pnpm/bin:/home/i/.local/node/bin:${PATH}
 
 COPY --chown=i:i cache/solana-dev/node/ /home/i/.local/node/
 COPY --chown=i:i cache/pnpm/ /home/i/.local/share/pnpm/
+COPY --chown=i:i cache/pnpm-store/ /home/i/.local/share/pnpm/store/
 
 RUN node --version && npm --version && pnpm --version
 
