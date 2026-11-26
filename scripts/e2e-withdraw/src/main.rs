@@ -380,7 +380,7 @@ async fn get_latest_blockhash(client: &reqwest::Client) -> Result<Hash> {
 async fn send_transaction(client: &reqwest::Client, tx_bytes: &[u8]) -> Result<String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
-    let body = json!({"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":[b64,{"encoding":"base64","skipPreflight":false}]});
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":[b64,{"encoding":"base64","skipPreflight":false,"preflightCommitment":"confirmed"}]});
     let resp: Value = client
         .post(&zkpool_common::rpc_url())
         .json(&body)

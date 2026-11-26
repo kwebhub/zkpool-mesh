@@ -47,7 +47,7 @@ stack: validate-spec sync check deps mesh e2e-build services
 
 e2e:
 	@echo "==> [stack] e2e deposit"
-	@$(mesh_run) 'cd /home/i && ./scripts/e2e-deposit/target/release/e2e-deposit' 2>&1 | tee /tmp/e2e-deposit.log
+	@docker exec zkpool-mesh bash -c 'cd /home/i && ./scripts/e2e-deposit/target/release/e2e-deposit' 2>&1 | tee /tmp/e2e-deposit.log
 	@echo "==> [stack] extracting note"
 	@awk '/^=== NOTE/,/^}$$/' /tmp/e2e-deposit.log | sed '1d' > /tmp/note.json
 	@python3 -c "import json; d=json.load(open('/tmp/note.json')); d['splits']=['00000000000000000000000000000000000000000000000000000000000f4240','0000000000000000000000000000000000000000000000000000000000000000','0000000000000000000000000000000000000000000000000000000000000000']; d['note_index']=0; json.dump(d,open('/tmp/note.json','w'),indent=2)"
@@ -69,7 +69,7 @@ e2e-build:
 
 e2e-split:
 	@echo "==> [stack] e2e deposit-split"
-	@$(mesh_run) 'cd /home/i && ./scripts/e2e-deposit-split/target/release/e2e-deposit-split' 2>&1 | tee /tmp/e2e-split.log
+	@docker exec zkpool-mesh bash -c 'cd /home/i && ./scripts/e2e-deposit-split/target/release/e2e-deposit-split' 2>&1 | tee /tmp/e2e-split.log
 	@echo "==> [stack] extracting 3 notes"
 	@python3 -c "import re,json; \
 	  data=open('/tmp/e2e-split.log').read(); \

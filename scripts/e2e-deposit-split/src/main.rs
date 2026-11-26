@@ -284,7 +284,7 @@ async fn send_transaction(client: &reqwest::Client, tx_bytes: &[u8]) -> Result<S
         "jsonrpc": "2.0",
         "id": 1,
         "method": "sendTransaction",
-        "params": [b64, {"encoding": "base64", "skipPreflight": false}],
+        "params": [b64, {"encoding": "base64", "skipPreflight": false, "preflightCommitment": "confirmed"}],
     });
     let resp: Value = client
         .post(&zkpool_common::rpc_url())
