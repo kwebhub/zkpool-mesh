@@ -11,6 +11,7 @@ services:
     ports:
       - "8899:8899"
       - "9900:9900"
+      - "8003:800"
     volumes:
       - zkpool-validator-ledger:/home/i/.ledger
     healthcheck:
@@ -75,6 +76,7 @@ services:
       - ../tests:/home/i/tests
       - ../solana:/home/i/.config/solana
       - ../.env:/home/i/.env
+      - ../.secrets:/home/i/.secrets
     ports:
       - "4001:4001"
       - "4002:4002"

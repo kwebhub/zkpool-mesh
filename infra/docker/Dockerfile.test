@@ -20,9 +20,13 @@ SHELL ["/bin/bash", "-c"]
 WORKDIR /home/i
 
 ENV HOME=/home/i \
+  SOLANA_DISABLE_UPDATE=1 \
+  AGAVE_DISABLE_UPDATE=1 \
+  SOLANA_INSTALL_NO_UPDATE=1 \
   PATH=/home/i/.local/share/solana/install/active_release/bin:${PATH}
 
-COPY --chown=i:i cache/solana-dev/bin/ /home/i/.local/share/solana/install/active_release/bin/
+COPY --chown=i:i cache/solana-dev/solana-install/ /home/i/.local/share/solana/install/
+COPY --chown=i:i cache/solana-dev/solana-config-install/ /home/i/.config/solana/install/
 
 RUN solana --version && solana-test-validator --version
 

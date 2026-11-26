@@ -1,18 +1,5 @@
 #!/usr/bin/env bash
 # scripts/boot.sh — one-time cache warm-up for zkpool-mesh.
-#
-# Versions are read from .env (empty => latest):
-#   ANCHOR_VERSION, NODE_VERSION, PNPM_VERSION, GO_VERSION, CARGO_DENY_VERSION
-#
-# Cache layout (gitignored, NOT removed by `make wipe`):
-#   cache/go/                Go toolchain
-#   cache/solana-dev/bin/    Rust, Solana CLI, Anchor, avm
-#   cache/solana-dev/node/   Node.js
-#   cache/cargo-bin/         cargo-deny + cargo-audit
-#   cache/sunspot/           reilabs/sunspot repo + binary
-#   cache/nargo/             nargo binary
-#   cache/pnpm/              pnpm binary
-#   cache/images/*.tar       docker images
 
 set -euo pipefail
 
@@ -44,7 +31,6 @@ load_env() {
     log "created .env from .env.example"
   fi
   set -a
-  # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
 }
@@ -59,6 +45,8 @@ NODE_VERSION="$(env_opt NODE_VERSION)"
 PNPM_VERSION="$(env_opt PNPM_VERSION)"
 GO_VERSION="$(env_opt GO_VERSION)"
 CARGO_DENY_VERSION="$(env_opt CARGO_DENY_VERSION)"
+SOLANA_PLATFORM_TOOLS_VERSION="$(env_opt SOLANA_PLATFORM_TOOLS_VERSION)"
+SOLANA_PLATFORM_TOOLS_VERSION="${SOLANA_PLATFORM_TOOLS_VERSION:-v1.56}"
 
 log "versions from .env:"
 printf '    ANCHOR_VERSION=%s\n' "${ANCHOR_VERSION:-<latest>}"
@@ -66,6 +54,31 @@ printf '    NODE_VERSION=%s\n' "${NODE_VERSION:-<latest>}"
 printf '    PNPM_VERSION=%s\n' "${PNPM_VERSION:-<latest>}"
 printf '    GO_VERSION=%s\n' "${GO_VERSION:-<latest>}"
 printf '    CARGO_DENY_VERSION=%s\n' "${CARGO_DENY_VERSION:-<latest>}"
+printf '    SOLANA_PLATFORM_TOOLS_VERSION=%s\n' "$SOLANA_PLATFORM_TOOLS_VERSION"
+
+boot_go() {
+  log "go toolchain"
+  local go_dir="$CACHE/go"
+  if [ -x "$go_dir/bin/go" ]; then
+    skip "go: $("$go_dir/bin/go" version)"
+    return
+  fi
+  mkdir -p "$go_dir"
+  local version="$GO_VERSION"
+  if [ -z "$version" ]; then
+    version="$(curl -fsSL --retry 5 --retry-all-errors https://go.dev/dl/?mode=json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["version"])')"
+  fi
+  [ -n "$version" ] || die "could not determine Go version"
+  local url="https://go.dev/dl/${version}.linux-amd64.tar.gz"
+  local tarball="$CACHE/${version}.linux-amd64.tar.gz"
+  log "  downloading $version"
+  curl -fL --retry 5 --retry-all-errors --retry-delay 5 -o "$tarball" "$url"
+  tar -xzf "$tarball" -C "$go_dir" --strip-components=1
+  rm -f "$tarball"
+  [ -x "$go_dir/bin/go" ] || die "go extraction failed"
+  log "  go binary: $go_dir/bin/go"
+}
 
 ensure_builder() {
   log "builder image ($BUILDER_IMAGE)"
@@ -81,7 +94,7 @@ FROM debian:13
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RUSTUP_HOME=${BUILDER_HOME}/.rustup \\
     CARGO_HOME=${BUILDER_HOME}/.cargo \\
-    PATH=${BUILDER_HOME}/.cargo/bin:${BUILDER_HOME}/.local/share/solana/install/active_release/bin:${BUILDER_HOME}/.avm/bin:\$PATH
+    PATH=${BUILDER_HOME}/.cargo/bin:${BUILDER_HOME}/.local/share/solana/install/active_release/bin:\$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \\
       build-essential \\
@@ -109,37 +122,18 @@ EOF
   rm -rf "$ctx"
 }
 
-boot_go() {
-  log "go toolchain"
-  local go_dir="$CACHE/go"
-  if [ -x "$go_dir/bin/go" ]; then
-    skip "go: $("$go_dir/bin/go" version)"
-    return
-  fi
-  mkdir -p "$go_dir"
-  local version="$GO_VERSION"
-  if [ -z "$version" ]; then
-    version="$(curl -fsSL --retry 5 --retry-all-errors https://go.dev/dl/?mode=json |
-      python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["version"])')"
-  fi
-  [ -n "$version" ] || die "could not determine Go version"
-  local url="https://go.dev/dl/${version}.linux-amd64.tar.gz"
-  local tarball="$CACHE/${version}.linux-amd64.tar.gz"
-  log "  downloading $version"
-  curl -fL --retry 5 --retry-all-errors --retry-delay 5 -o "$tarball" "$url"
-  tar -xzf "$tarball" -C "$go_dir" --strip-components=1
-  rm -f "$tarball"
-  [ -x "$go_dir/bin/go" ] || die "go extraction failed"
-  log "  go binary: $go_dir/bin/go"
-}
-
 boot_solana_dev() {
   log "solana dev toolchain (Rust, Solana CLI, Anchor, Node, cargo tools)"
   local bin_dir="$CACHE/solana-dev/bin"
   local node_dir="$CACHE/solana-dev/node/bin"
   local cargo_dir="$CACHE/cargo-bin"
+  local pt_dir="$CACHE/solana-dev/platform-tools"
+  local si_dir="$CACHE/solana-dev/solana-install"
+  local ci_dir="$CACHE/solana-dev/solana-config-install"
   if [ -e "$bin_dir/anchor" ] && [ -x "$bin_dir/solana" ] && [ -x "$node_dir/node" ] &&
-    [ -x "$cargo_dir/cargo-deny" ] && [ -x "$cargo_dir/cargo-audit" ]; then
+    [ -x "$cargo_dir/cargo-deny" ] && [ -x "$cargo_dir/cargo-audit" ] && [ -x "$cargo_dir/cargo-build-sbf" ] &&
+    [ -d "$pt_dir" ] && [ -n "$(ls -A "$pt_dir" 2>/dev/null)" ] &&
+    [ -d "$si_dir" ] && [ -f "$ci_dir/config.yml" ]; then
     skip "solana-dev"
     return
   fi
@@ -153,10 +147,11 @@ boot_solana_dev() {
     -e "ANCHOR_VERSION=${ANCHOR_VERSION}" \
     -e "NODE_VERSION=${NODE_VERSION}" \
     -e "CARGO_DENY_VERSION=${CARGO_DENY_VERSION}" \
+    -e "SOLANA_PLATFORM_TOOLS_VERSION=${SOLANA_PLATFORM_TOOLS_VERSION}" \
     "$BUILDER_IMAGE" \
     bash -lc '
       set -e
-      export PATH="$HOME/.local/share/solana/install/active_release/bin:$HOME/.cargo/bin:$HOME/.avm/bin:$PATH"
+      export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
       # Rust
       curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -165,15 +160,13 @@ boot_solana_dev() {
 
       # Solana CLI / Agave (standalone installer, no Surfpool)
       sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-      export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+      export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
-      # Anchor via avm
-      cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
-      export PATH="$HOME/.avm/bin:$PATH"
+      # Anchor CLI (no avm — single pinned version)
       if [ -n "${ANCHOR_VERSION:-}" ]; then
-        avm install "$ANCHOR_VERSION" && avm use "$ANCHOR_VERSION"
+        cargo install --git https://github.com/coral-xyz/anchor anchor-cli --tag "v${ANCHOR_VERSION}" --locked --force
       else
-        avm install latest && avm use latest
+        cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
       fi
 
       # Node via nvm
@@ -186,7 +179,7 @@ boot_solana_dev() {
         nvm install --lts && nvm alias default "lts/*"
       fi
 
-      # cargo tools
+      # cargo tools (standalone cargo-build-sbf shadows the CLI-bundled one)
       if [ -n "${CARGO_DENY_VERSION:-}" ]; then
         cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
       else
@@ -194,30 +187,39 @@ boot_solana_dev() {
       fi
       cargo install cargo-audit --locked
 
-      # platform-tools for cargo-build-sbf (offline deploy of verifier)
-      export SOLANA_PLATFORM_TOOLS_VERSION=v1.56
-      cargo-build-sbf --tools-version "$SOLANA_PLATFORM_TOOLS_VERSION" --help >/dev/null 2>&1 || true
-      pt_src="$HOME/.cache/solana"
-      if [ -d "$pt_src" ]; then
+      rm -f "$HOME/.local/share/solana/install/active_release/bin/cargo-build-sbf"
+      cargo install cargo-build-sbf --locked
+
+      # platform-tools for cargo-build-sbf
+      set +e
+      mkdir -p /tmp/pt-probe/src
+      echo "fn main() {}" > /tmp/pt-probe/src/main.rs
+      printf "[package]\nname = \"pt-probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n" > /tmp/pt-probe/Cargo.toml
+      ( cd /tmp/pt-probe && "$HOME/.cargo/bin/cargo-build-sbf" --sbf-out-dir /tmp/pt-probe/out )
+      pt_rc=$?
+      set -e
+      if [ $pt_rc -ne 0 ]; then
+        echo "WARN: cargo-build-sbf probe exit=$pt_rc" >&2
+      fi
+      if [ -d "$HOME/.cache/solana" ]; then
         mkdir -p /cache/solana-dev/platform-tools
-        cp -a "$pt_src/." /cache/solana-dev/platform-tools/
+        cp -a "$HOME/.cache/solana/." /cache/solana-dev/platform-tools/
+        echo "platform-tools cached: $(find /cache/solana-dev/platform-tools -maxdepth 2 -type d | wc -l) dirs"
+      else
+        echo "ERROR: $HOME/.cache/solana not created — platform-tools NOT cached" >&2
+        exit 1
       fi
 
       # Copy to cache
       mkdir -p /cache/solana-dev/bin /cache/solana-dev/node/bin /cache/cargo-bin
+      mkdir -p /cache/solana-dev/solana-install /cache/solana-dev/solana-config-install
+      cp -a "$HOME/.local/share/solana/install/." /cache/solana-dev/solana-install/
       cp -a "$HOME/.local/share/solana/install/active_release/bin/." /cache/solana-dev/bin/
+      rm -f /cache/solana-dev/bin/cargo-build-sbf
+      cp -a "$HOME/.config/solana/install/." /cache/solana-dev/solana-config-install/ 2>/dev/null || true
       cp -a "$HOME/.cargo/bin/." /cache/solana-dev/bin/ 2>/dev/null || true
-      cp -a "$HOME/.avm/bin/." /cache/solana-dev/bin/ 2>/dev/null || true
-      cp -a "$HOME/.avm/." /cache/solana-dev/avm/ 2>/dev/null || true
       cp -a "$HOME/.rustup/." /cache/solana-dev/rustup/ 2>/dev/null || true
-      if [ -L /cache/solana-dev/bin/anchor ]; then
-        target="$(readlink -f /cache/solana-dev/bin/anchor)"
-        if [ -x "$target" ] && [ "$target" != "/cache/solana-dev/bin/anchor" ]; then
-          rm -f /cache/solana-dev/bin/anchor
-          cp -a "$target" /cache/solana-dev/bin/anchor
-        fi
-      fi
-      for f in "$HOME/.cargo/bin/cargo-deny" "$HOME/.cargo/bin/cargo-audit"; do
+      for f in "$HOME/.cargo/bin/cargo-deny" "$HOME/.cargo/bin/cargo-audit" "$HOME/.cargo/bin/cargo-build-sbf"; do
         [ -f "$f" ] && cp "$f" /cache/cargo-bin/
       done
       node_bin="$(command -v node)"
@@ -233,6 +235,10 @@ boot_solana_dev() {
   [ -x "$node_dir/node" ] || die "node binary missing in cache"
   [ -x "$cargo_dir/cargo-deny" ] || die "cargo-deny missing in cache"
   [ -x "$cargo_dir/cargo-audit" ] || die "cargo-audit missing in cache"
+  [ -x "$cargo_dir/cargo-build-sbf" ] || die "cargo-build-sbf missing in cache"
+  [ -d "$pt_dir" ] && [ -n "$(ls -A "$pt_dir" 2>/dev/null)" ] || die "platform-tools missing in cache"
+  [ -d "$si_dir" ] || die "solana-install missing in cache"
+  [ -f "$ci_dir/config.yml" ] || die "solana-config-install/config.yml missing in cache"
   log "  solana-dev: $bin_dir"
 }
 
